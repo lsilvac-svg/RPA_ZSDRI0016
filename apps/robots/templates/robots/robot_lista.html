@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block titulo %}Robots{% endblock %}
+{% block contenido %}
+<h1 class="h3 mb-4">Robots</h1>
+<div class="row g-3">
+  {% for robot in robots %}
+  <div class="col-md-6 col-xl-4">
+    <div class="card shadow-sm h-100">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-start">
+          <h2 class="h5 mb-1">{{ robot.nombre }}</h2>
+          {% if not robot.instalado %}<span class="badge text-bg-warning">No instalado</span>
+          {% elif robot.activo %}<span class="badge text-bg-success">Activo</span>
+          {% else %}<span class="badge text-bg-secondary">Inactivo</span>{% endif %}
+        </div>
+        <div class="text-muted small mb-2"><code>{{ robot.codigo }}</code> · {{ robot.conexion|default:"Sin conexión SAP" }}</div>
+        <p class="small mb-3">{{ robot.descripcion|truncatechars:160 }}</p>
+        {% with ultima=robot.ultima_ejecucion %}
+        <div class="small">Última ejecución:
+          {% if ultima %}<a href="{% url 'robots:ejecucion' ultima.pk %}">#{{ ultima.pk }}</a> {% include "includes/estado.html" with ejecucion=ultima %} {{ ultima.creada|date:"d/m H:i" }}
+          {% else %}<span class="text-muted">nunca</span>{% endif %}
+        </div>
+        {% endwith %}
+      </div>
+      <div class="card-footer bg-white">
+        <a href="{% url 'robots:detalle' robot.pk %}" class="btn btn-sm btn-primary"><i class="bi bi-play-fill"></i> Abrir</a>
+        {% if user.es_admin and robot.instalado %}
+        <a href="{% url 'robots:configurar' robot.pk %}" class="btn btn-sm btn-outline-secondary"><i class="bi bi-sliders"></i> Configurar</a>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  {% empty %}
+  <p class="text-muted">No hay robots instalados.</p>
+  {% endfor %}
+</div>
+{% endblock %}

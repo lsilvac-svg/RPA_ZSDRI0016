@@ -1,0 +1,30 @@
+{% if form.non_field_errors %}
+  <div class="alert alert-danger">{{ form.non_field_errors|join:" " }}</div>
+{% endif %}
+{% for campo in form.hidden_fields %}{{ campo }}{% endfor %}
+<div class="row g-3">
+  {% for campo in form.visible_fields %}
+  <div class="{{ columnas|default:'col-md-6' }}">
+    {% if campo.widget_type == 'checkbox' %}
+      <div class="form-check form-switch mt-4">
+        {{ campo }}
+        <label class="form-check-label" for="{{ campo.id_for_label }}">{{ campo.label }}</label>
+      </div>
+    {% elif campo.widget_type == 'checkboxselectmultiple' %}
+      <label class="form-label">{{ campo.label }}</label>
+      <div>
+        {% for opcion in campo %}
+          <div class="form-check form-check-inline">
+            {{ opcion.tag }}<label class="form-check-label" for="{{ opcion.id_for_label }}">{{ opcion.choice_label }}</label>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <label class="form-label" for="{{ campo.id_for_label }}">{{ campo.label }}{% if campo.field.required %} <span class="text-danger">*</span>{% endif %}</label>
+      {{ campo }}
+    {% endif %}
+    {% if campo.help_text %}<div class="form-text">{{ campo.help_text }}</div>{% endif %}
+    {% for error in campo.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+  </div>
+  {% endfor %}
+</div>

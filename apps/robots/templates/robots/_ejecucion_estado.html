@@ -1,0 +1,61 @@
+{% load rpa %}
+<div id="ejecucion-estado"
+     {% if ejecucion.activa %}hx-get="{% url 'robots:ejecucion' ejecucion.pk %}" hx-trigger="every 3s" hx-swap="outerHTML"{% endif %}>
+  <div class="row g-3 mb-3">
+    <div class="col-lg-5">
+      <div class="card shadow-sm h-100">
+        <div class="card-body">
+          <dl class="row mb-0 small">
+            <dt class="col-5">Estado</dt><dd class="col-7">{% include "includes/estado.html" %}{% if ejecucion.cancelacion_solicitada and ejecucion.activa %} <span class="badge text-bg-warning">Cancelando…</span>{% endif %}</dd>
+            <dt class="col-5">Origen</dt><dd class="col-7">{{ ejecucion.get_origen_display }}{% if ejecucion.programacion %} ({{ ejecucion.programacion.nombre }}){% endif %}</dd>
+            <dt class="col-5">Solicitada por</dt><dd class="col-7">{{ ejecucion.solicitada_por|default:"Programador" }}</dd>
+            <dt class="col-5">Creada</dt><dd class="col-7">{{ ejecucion.creada|date:"d/m/Y H:i:s" }}</dd>
+            <dt class="col-5">Inicio / fin</dt><dd class="col-7">{{ ejecucion.inicio|date:"H:i:s"|default:"—" }} / {{ ejecucion.fin|date:"H:i:s"|default:"—" }}</dd>
+            <dt class="col-5">Duración</dt><dd class="col-7">{{ ejecucion.duracion|duracion }}</dd>
+            <dt class="col-5">Intentos</dt><dd class="col-7">{{ ejecucion.intentos }} de {{ ejecucion.robot.reintentos }}</dd>
+            {% for etiqueta, valor in parametros %}
+            <dt class="col-5">{{ etiqueta }}</dt><dd class="col-7">{{ valor }}</dd>
+            {% endfor %}
+          </dl>
+        </div>
+        <div class="card-footer bg-white">
+          {% if puede_cancelar %}
+          <form method="post" action="{% url 'robots:cancelar' ejecucion.pk %}" class="d-inline">
+            {% csrf_token %}<button class="btn btn-sm btn-outline-danger"><i class="bi bi-stop-circle"></i> Cancelar</button>
+          </form>
+          {% endif %}
+          {% if ejecucion.puede_reintentar %}
+          <form method="post" action="{% url 'robots:reintentar' ejecucion.pk %}" class="d-inline">
+            {% csrf_token %}<button class="btn btn-sm btn-outline-primary"><i class="bi bi-arrow-repeat"></i> Reintentar</button>
+          </form>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-7">
+      <div class="card shadow-sm h-100">
+        <div class="card-header bg-white fw-semibold">Resultado</div>
+        <div class="card-body">
+          {% if ejecucion.mensaje %}<p class="mb-2">{{ ejecucion.mensaje }}</p>{% else %}<p class="text-muted">Aún sin resultado.</p>{% endif %}
+          {% if ejecucion.archivo %}<p class="small mb-2"><i class="bi bi-file-earmark-excel text-success"></i> <code>{{ ejecucion.archivo }}</code></p>{% endif %}
+          {% if ejecucion.captura %}
+          <a href="{% url 'robots:captura' ejecucion.pk %}" target="_blank">
+            <img src="{% url 'robots:captura' ejecucion.pk %}" class="img-fluid border rounded" style="max-height: 240px" alt="Captura de pantalla del error">
+          </a>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card shadow-sm">
+    <div class="card-header bg-white fw-semibold d-flex justify-content-between">
+      <span><i class="bi bi-terminal"></i> Log</span>
+      {% if ejecucion.activa %}<span class="small text-muted">Actualización automática cada 3 s</span>{% endif %}
+    </div>
+    <div class="card-body p-0">
+      <pre class="log-consola p-3 mb-0">{% for l in logs %}<span class="{{ l.color }}">{{ l.fecha|date:"H:i:s" }}  {{ l.nivel|ljust:7 }}  {{ l.mensaje }}</span>
+{% empty %}Sin registros todavía.{% endfor %}</pre>
+    </div>
+  </div>
+</div>

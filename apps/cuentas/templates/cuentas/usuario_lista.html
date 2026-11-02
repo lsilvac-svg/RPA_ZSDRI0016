@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block titulo %}Usuarios{% endblock %}
+{% block contenido %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <h1 class="h3 mb-0">Usuarios</h1>
+  <a href="{% url 'cuentas:crear' %}" class="btn btn-primary"><i class="bi bi-person-plus"></i> Nuevo usuario</a>
+</div>
+<div class="card shadow-sm">
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0">
+      <thead class="table-light"><tr><th>Correo</th><th>Nombre</th><th>Perfil</th><th>Estado</th><th>Último acceso</th><th></th></tr></thead>
+      <tbody>
+        {% for u in usuarios %}
+        <tr>
+          <td>{{ u.email }}{% if u.is_superuser %} <span class="badge text-bg-dark">Superadmin</span>{% endif %}</td>
+          <td>{{ u.get_full_name|default:"—" }}</td>
+          <td><span class="badge text-bg-{% if u.es_admin %}primary{% else %}secondary{% endif %}">{{ u.get_rol_display }}</span></td>
+          <td>{% if u.is_active %}<span class="text-success">Activo</span>{% else %}<span class="text-muted">Inactivo</span>{% endif %}</td>
+          <td>{{ u.last_login|date:"d/m/Y H:i"|default:"Nunca" }}</td>
+          <td class="text-end"><a href="{% url 'cuentas:editar' u.pk %}" class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i></a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

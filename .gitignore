@@ -1,0 +1,13 @@
+venv/
+__pycache__/
+.env
+
+# Datos locales de la plataforma
+db.sqlite3*
+media/
+logs/
+staticfiles/
+
+# Robot anterior (app.py)
+rpa_sap.log*
+capturas/

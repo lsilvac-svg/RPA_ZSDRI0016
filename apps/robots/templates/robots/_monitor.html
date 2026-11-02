@@ -1,0 +1,73 @@
+{% load rpa %}
+<div id="monitor" hx-get="{% url 'robots:monitor' %}" hx-trigger="every 3s" hx-swap="outerHTML">
+  <div class="row g-3 mb-3">
+    <div class="col-lg-4">
+      <div class="card shadow-sm h-100">
+        <div class="card-header bg-white fw-semibold"><i class="bi bi-hdd-rack"></i> Worker</div>
+        <div class="card-body small">
+          {% if estado_worker.activo %}
+            <div class="fs-5 text-success mb-2"><i class="bi bi-circle-fill"></i> Activo</div>
+            <div>Equipo: <strong>{{ estado_worker.equipo }}</strong> (PID {{ estado_worker.pid }})</div>
+            <div>Iniciado: {{ estado_worker.iniciado|date:"d/m/Y H:i" }}</div>
+            <div>Último latido: {{ estado_worker.ultimo_latido|date:"H:i:s" }}</div>
+          {% else %}
+            <div class="fs-5 text-danger mb-2"><i class="bi bi-circle-fill"></i> Detenido</div>
+            <p class="mb-1">Las ejecuciones quedan en cola hasta que se inicie el worker en el equipo con SAP:</p>
+            <code>python manage.py rpa_worker</code>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-8">
+      <div class="card shadow-sm h-100">
+        <div class="card-header bg-white fw-semibold"><i class="bi bi-play-circle"></i> En ejecución</div>
+        <div class="card-body">
+          {% if en_curso %}
+            <div class="d-flex justify-content-between mb-2">
+              <div><a href="{% url 'robots:ejecucion' en_curso.pk %}" class="fw-semibold">#{{ en_curso.pk }} {{ en_curso.robot }}</a>
+                <span class="text-muted small">· {{ en_curso.solicitada_por|default:"Programador" }} · intento {{ en_curso.intentos }}</span></div>
+              <div>{% include "includes/estado.html" with ejecucion=en_curso %} <span class="small">{{ en_curso.duracion|duracion }}</span></div>
+            </div>
+            <pre class="log-consola p-2 mb-0" style="max-height: 260px">{% for l in logs %}<span class="{{ l.color }}">{{ l.fecha|date:"H:i:s" }}  {{ l.mensaje }}</span>
+{% endfor %}</pre>
+          {% else %}
+            <p class="text-muted mb-0">No hay ningún robot ejecutándose.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-3">
+    <div class="col-lg-5">
+      <div class="card shadow-sm">
+        <div class="card-header bg-white fw-semibold"><i class="bi bi-hourglass"></i> En cola ({{ cola|length }})</div>
+        <ul class="list-group list-group-flush">
+          {% for e in cola %}
+          <li class="list-group-item d-flex justify-content-between">
+            <a href="{% url 'robots:ejecucion' e.pk %}">#{{ e.pk }} {{ e.robot }}</a>
+            <span class="small text-muted">{{ e.get_origen_display }} · {{ e.creada|date:"H:i" }}</span>
+          </li>
+          {% empty %}
+          <li class="list-group-item text-muted">La cola está vacía.</li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+    <div class="col-lg-7">
+      <div class="card shadow-sm">
+        <div class="card-header bg-white fw-semibold"><i class="bi bi-clock-history"></i> Finalizadas recientemente</div>
+        <ul class="list-group list-group-flush">
+          {% for e in recientes %}
+          <li class="list-group-item d-flex justify-content-between align-items-center">
+            <span><a href="{% url 'robots:ejecucion' e.pk %}">#{{ e.pk }} {{ e.robot }}</a> <span class="small text-muted">{{ e.fin|date:"d/m H:i" }} · {{ e.duracion|duracion }}</span></span>
+            {% include "includes/estado.html" with ejecucion=e %}
+          </li>
+          {% empty %}
+          <li class="list-group-item text-muted">Sin ejecuciones finalizadas.</li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>

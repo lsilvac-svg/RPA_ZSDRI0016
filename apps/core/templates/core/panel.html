@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block titulo %}Panel{% endblock %}
+{% block contenido %}
+<h1 class="h3 mb-4">Panel</h1>
+
+<div class="row g-3 mb-4">
+  {% with i=indicadores %}
+  <div class="col-sm-6 col-xl-3">
+    <div class="card shadow-sm tarjeta-indicador"><div class="card-body d-flex justify-content-between">
+      <div><div class="text-muted small">Ejecuciones hoy</div><div class="fs-3 fw-semibold">{{ i.total }}</div></div>
+      <i class="bi bi-play-circle icono"></i>
+    </div></div>
+  </div>
+  <div class="col-sm-6 col-xl-3">
+    <div class="card shadow-sm tarjeta-indicador"><div class="card-body d-flex justify-content-between">
+      <div><div class="text-muted small">Exitosas hoy</div><div class="fs-3 fw-semibold text-success">{{ i.exitosas }}</div></div>
+      <i class="bi bi-check-circle icono text-success"></i>
+    </div></div>
+  </div>
+  <div class="col-sm-6 col-xl-3">
+    <div class="card shadow-sm tarjeta-indicador"><div class="card-body d-flex justify-content-between">
+      <div><div class="text-muted small">Fallidas hoy</div><div class="fs-3 fw-semibold text-danger">{{ i.fallidas }}</div>
+        <div class="small text-muted">{{ fallidas_semana }} en los últimos 7 días</div></div>
+      <i class="bi bi-x-circle icono text-danger"></i>
+    </div></div>
+  </div>
+  <div class="col-sm-6 col-xl-3">
+    <div class="card shadow-sm tarjeta-indicador"><div class="card-body d-flex justify-content-between">
+      <div><div class="text-muted small">En curso / en cola</div><div class="fs-3 fw-semibold text-primary">{{ i.en_curso }}</div>
+        <div class="small text-muted">{{ robots_activos }} robots activos</div></div>
+      <i class="bi bi-hourglass-split icono text-primary"></i>
+    </div></div>
+  </div>
+  {% endwith %}
+</div>
+
+<div class="row g-3">
+  <div class="col-xl-8">
+    <div class="card shadow-sm">
+      <div class="card-header bg-white d-flex justify-content-between align-items-center">
+        <span class="fw-semibold">Últimas ejecuciones</span>
+        <a href="{% url 'robots:ejecuciones' %}" class="small">Ver todas</a>
+      </div>
+      {% include "includes/tabla_ejecuciones.html" with ejecuciones=ultimas %}
+    </div>
+  </div>
+  <div class="col-xl-4">
+    <div class="card shadow-sm">
+      <div class="card-header bg-white fw-semibold">Próximas ejecuciones programadas</div>
+      <ul class="list-group list-group-flush">
+        {% for p in proximas %}
+        <li class="list-group-item">
+          <div class="fw-semibold">{{ p.robot }}</div>
+          <div class="small text-muted">{{ p.nombre }} · {{ p.proxima_ejecucion|date:"d/m/Y H:i" }}</div>
+        </li>
+        {% empty %}
+        <li class="list-group-item text-muted">No hay programaciones activas.</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+</div>
+{% endblock %}

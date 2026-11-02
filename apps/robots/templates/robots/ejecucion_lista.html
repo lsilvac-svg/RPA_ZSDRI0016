@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block titulo %}Ejecuciones{% endblock %}
+{% block contenido %}
+<h1 class="h3 mb-4">Ejecuciones</h1>
+
+<form method="get" class="card shadow-sm mb-3">
+  <div class="card-body row g-2 align-items-end">
+    <div class="col-md-3">{{ filtro.robot }}</div>
+    <div class="col-md-3">{{ filtro.estado }}</div>
+    <div class="col-md-2"><label class="form-label small mb-0">Desde</label>{{ filtro.desde }}</div>
+    <div class="col-md-2"><label class="form-label small mb-0">Hasta</label>{{ filtro.hasta }}</div>
+    <div class="col-md-2 d-flex gap-2">
+      <button class="btn btn-primary flex-grow-1"><i class="bi bi-funnel"></i> Filtrar</button>
+      <a href="{% url 'robots:ejecuciones' %}" class="btn btn-outline-secondary" title="Limpiar"><i class="bi bi-x-lg"></i></a>
+    </div>
+  </div>
+</form>
+
+<div class="card shadow-sm">
+  {% include "includes/tabla_ejecuciones.html" %}
+</div>
+
+{% if is_paginated %}
+<nav class="mt-3">
+  <ul class="pagination justify-content-center">
+    {% if page_obj.has_previous %}
+    <li class="page-item"><a class="page-link" href="?{{ consulta }}&page={{ page_obj.previous_page_number }}">Anterior</a></li>
+    {% endif %}
+    <li class="page-item disabled"><span class="page-link">Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}</span></li>
+    {% if page_obj.has_next %}
+    <li class="page-item"><a class="page-link" href="?{{ consulta }}&page={{ page_obj.next_page_number }}">Siguiente</a></li>
+    {% endif %}
+  </ul>
+</nav>
+{% endif %}
+{% endblock %}

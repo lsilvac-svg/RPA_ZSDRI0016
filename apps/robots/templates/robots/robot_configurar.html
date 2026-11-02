@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block titulo %}Configurar {{ robot.nombre }}{% endblock %}
+{% block contenido %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <h1 class="h3 mb-0">Configurar: {{ robot.nombre }}</h1>
+  <a href="{% url 'robots:detalle' robot.pk %}" class="btn btn-outline-secondary"><i class="bi bi-arrow-left"></i> Volver</a>
+</div>
+<form method="post" novalidate>
+  {% csrf_token %}
+  <div class="card shadow-sm mb-4">
+    <div class="card-header bg-white fw-semibold">General</div>
+    <div class="card-body">{% with form=general %}{% include "includes/campos.html" %}{% endwith %}</div>
+  </div>
+  <div class="card shadow-sm mb-4">
+    <div class="card-header bg-white fw-semibold">Parámetros del robot</div>
+    <div class="card-body">{% with form=propios %}{% include "includes/campos.html" %}{% endwith %}</div>
+  </div>
+  <button class="btn btn-primary"><i class="bi bi-check-lg"></i> Guardar configuración</button>
+  <a href="{% url 'robots:detalle' robot.pk %}" class="btn btn-link">Cancelar</a>
+</form>
+{% endblock %}

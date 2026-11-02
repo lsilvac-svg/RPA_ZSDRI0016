@@ -1,0 +1,1 @@
+<span class="badge text-bg-{{ ejecucion.color }}">{% if ejecucion.estado == 'EJECUTANDO' %}<span class="spinner-border spinner-border-sm me-1"></span>{% endif %}{{ ejecucion.get_estado_display }}</span>

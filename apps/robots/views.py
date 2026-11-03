@@ -83,10 +83,12 @@ class RobotEjecutarView(View):
             parametros=params.serializar(definicion, form.cleaned_data),
         )
         messages.success(request, f"Ejecución #{ejecucion.pk} encolada.")
-        if not EstadoWorker.obtener().activo:
+        worker = EstadoWorker.obtener()
+        if not worker.activo:
             messages.warning(
                 request,
-                "El worker no está activo: la ejecución esperará hasta que se inicie.",
+                f"El worker está {worker.get_estado_display().lower()}: la ejecución "
+                "quedará en cola hasta que se active (ver Monitor).",
             )
         return redirect("robots:ejecucion", pk=ejecucion.pk)
 
@@ -247,6 +249,32 @@ class MonitorView(TemplateView):
         )
         contexto["estado_worker"] = EstadoWorker.obtener()
         return contexto
+
+
+class WorkerCambiarView(AdminRequeridoMixin, View):
+    """Activa o pausa el worker. Al pausar, la ejecución en curso termina
+    normalmente y las nuevas quedan en cola."""
+
+    def post(self, request):
+        habilitar = request.POST.get("accion") == "activar"
+        worker = EstadoWorker.obtener()
+        worker.cambiar(habilitar, request.user)
+
+        if habilitar and not worker.en_linea:
+            messages.warning(
+                request,
+                "Worker activado, pero su proceso no está corriendo en el equipo "
+                "Windows. Se iniciará solo al iniciar sesión en Windows "
+                "(o ejecutar scripts\\iniciar_worker.bat).",
+            )
+        elif habilitar:
+            messages.success(request, "Worker activado: procesará la cola.")
+        else:
+            messages.info(
+                request,
+                "Worker pausado: no tomará ejecuciones nuevas. Si hay una en curso, terminará.",
+            )
+        return redirect(request.POST.get("volver") or reverse("robots:monitor"))
 
 
 # ==============================================

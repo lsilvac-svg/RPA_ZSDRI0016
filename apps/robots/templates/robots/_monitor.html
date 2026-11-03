@@ -5,16 +5,31 @@
       <div class="card shadow-sm h-100">
         <div class="card-header bg-white fw-semibold"><i class="bi bi-hdd-rack"></i> Worker</div>
         <div class="card-body small">
-          {% if estado_worker.activo %}
-            <div class="fs-5 text-success mb-2"><i class="bi bi-circle-fill"></i> Activo</div>
-            <div>Equipo: <strong>{{ estado_worker.equipo }}</strong> (PID {{ estado_worker.pid }})</div>
-            <div>Iniciado: {{ estado_worker.iniciado|date:"d/m/Y H:i" }}</div>
-            <div>Último latido: {{ estado_worker.ultimo_latido|date:"H:i:s" }}</div>
+          {% with w=estado_worker %}
+          <div class="fs-5 text-{{ w.color }} mb-2"><i class="bi bi-circle-fill"></i> {{ w.get_estado_display }}</div>
+          {% if w.en_linea %}
+            <div>Equipo: <strong>{{ w.equipo }}</strong> (PID {{ w.pid }})</div>
+            <div>Iniciado: {{ w.iniciado|date:"d/m/Y H:i" }}</div>
+            <div>Último latido: {{ w.ultimo_latido|date:"H:i:s" }}</div>
+            {% if not w.habilitado %}<div class="text-warning mt-1">No toma ejecuciones nuevas; quedan en cola.</div>{% endif %}
           {% else %}
-            <div class="fs-5 text-danger mb-2"><i class="bi bi-circle-fill"></i> Detenido</div>
-            <p class="mb-1">Las ejecuciones quedan en cola hasta que se inicie el worker en el equipo con SAP:</p>
-            <code>python manage.py rpa_worker</code>
+            <p class="mb-1">El proceso no está corriendo en el equipo Windows con SAP. Se inicia solo al iniciar sesión en Windows, o manualmente con:</p>
+            <code>scripts\iniciar_worker.bat</code>
           {% endif %}
+          {% if w.cambiado %}
+            <div class="text-muted mt-2">{% if w.habilitado %}Activado{% else %}Pausado{% endif %} por {{ w.cambiado_por|default:"—" }} el {{ w.cambiado|date:"d/m/Y H:i" }}</div>
+          {% endif %}
+          {% if user.es_admin %}
+          <form method="post" action="{% url 'robots:worker_cambiar' %}" class="mt-3">
+            {% csrf_token %}
+            {% if w.habilitado %}
+              <button name="accion" value="pausar" class="btn btn-sm btn-outline-warning"><i class="bi bi-pause-fill"></i> Pausar worker</button>
+            {% else %}
+              <button name="accion" value="activar" class="btn btn-sm btn-success"><i class="bi bi-play-fill"></i> Activar worker</button>
+            {% endif %}
+          </form>
+          {% endif %}
+          {% endwith %}
         </div>
       </div>
     </div>

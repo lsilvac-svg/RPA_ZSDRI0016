@@ -17,6 +17,7 @@ urlpatterns = [
     path("ejecuciones/<int:pk>/captura/", views.EjecucionCapturaView.as_view(), name="captura"),
 
     path("monitor/", views.MonitorView.as_view(), name="monitor"),
+    path("worker/", views.WorkerCambiarView.as_view(), name="worker_cambiar"),
 
     path("programaciones/", views.ProgramacionListView.as_view(), name="programaciones"),
     path("programaciones/nueva/", views.ProgramacionCrearView.as_view(), name="programacion_crear"),

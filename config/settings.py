@@ -106,7 +106,9 @@ if env("DB_ENGINE", "sqlite") == "postgres":
             "NAME": env("DB_NAME", "rpa_sap"),
             "USER": env("DB_USER", "rpa_sap"),
             "PASSWORD": env("DB_PASSWORD"),
-            "HOST": env("DB_HOST", "localhost"),
+            # 127.0.0.1 y no localhost: en Windows localhost puede resolver
+            # a IPv6 y Docker publica el puerto solo en IPv4
+            "HOST": env("DB_HOST", "127.0.0.1"),
             "PORT": env("DB_PORT", "5432"),
             "CONN_MAX_AGE": 60,
             "CONN_HEALTH_CHECKS": True,

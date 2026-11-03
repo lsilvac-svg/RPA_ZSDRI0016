@@ -12,7 +12,7 @@ from apps.sap.motor import ErrorSAP, SinDatos
 
 from . import ejecutor, planificador, registro
 from .base import Resultado, RobotSAP
-from .models import Ejecucion, Programacion, Robot
+from .models import Ejecucion, EstadoWorker, Programacion, Robot
 from .parametros import Parametro, Tipo, construir_formulario, resolver, serializar
 
 
@@ -58,6 +58,23 @@ class PlanificadorTests(TestCase):
         p.refresh_from_db()
         self.assertGreater(p.proxima_ejecucion, timezone.now())
         self.assertEqual(Ejecucion.objects.filter(origen=Ejecucion.Origen.PROGRAMADA).count(), 1)
+
+
+class EstadoWorkerTests(TestCase):
+    def test_estados(self):
+        worker = EstadoWorker.obtener()
+        self.assertEqual(worker.estado, EstadoWorker.Estado.NO_INICIADO)
+
+        worker.ultimo_latido = timezone.now()
+        self.assertEqual(worker.estado, EstadoWorker.Estado.ACTIVO)
+        self.assertTrue(worker.activo)
+
+        worker.habilitado = False
+        self.assertEqual(worker.estado, EstadoWorker.Estado.PAUSADO)
+        self.assertFalse(worker.activo)
+
+        worker.ultimo_latido = timezone.now() - EstadoWorker.LIMITE_LATIDO
+        self.assertEqual(worker.estado, EstadoWorker.Estado.NO_INICIADO)
 
 
 class ParametrosTests(TestCase):
@@ -192,6 +209,24 @@ class VistasEjecucionTests(TestCase):
         self.client.post(reverse("robots:cancelar", args=[ejecucion.pk]))
         ejecucion.refresh_from_db()
         self.assertEqual(ejecucion.estado, Ejecucion.Estado.CANCELADA)
+
+    def test_usuario_no_puede_pausar_worker(self):
+        self.client.force_login(self.usuario)
+        respuesta = self.client.post(reverse("robots:worker_cambiar"), {"accion": "pausar"})
+        self.assertEqual(respuesta.status_code, 403)
+        self.assertTrue(EstadoWorker.obtener().habilitado)
+
+    def test_admin_pausa_y_activa_worker(self):
+        admin = Usuario.objects.create_user("admin@ipesa.com.pe", "x", rol=Usuario.Rol.ADMIN)
+        self.client.force_login(admin)
+
+        self.client.post(reverse("robots:worker_cambiar"), {"accion": "pausar"})
+        worker = EstadoWorker.obtener()
+        self.assertFalse(worker.habilitado)
+        self.assertEqual(worker.cambiado_por, admin)
+
+        self.client.post(reverse("robots:worker_cambiar"), {"accion": "activar"})
+        self.assertTrue(EstadoWorker.obtener().habilitado)
 
     def test_monitor_parcial_htmx(self):
         self.client.force_login(self.usuario)

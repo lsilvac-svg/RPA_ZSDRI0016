@@ -214,15 +214,30 @@ class LogEjecucion(models.Model):
 
 
 class EstadoWorker(models.Model):
-    """Fila única con el latido del worker que ejecuta los robots."""
+    """Fila única con el estado del worker que ejecuta los robots.
+
+    El proceso del worker corre en Windows y reporta un latido. Desde el
+    panel, un administrador lo habilita o pausa (campo `habilitado`); el
+    worker lo lee en cada ciclo.
+    """
 
     LIMITE_LATIDO = timedelta(seconds=30)
+
+    class Estado(models.TextChoices):
+        ACTIVO = "ACTIVO", "Activo"
+        PAUSADO = "PAUSADO", "Pausado"
+        NO_INICIADO = "NO_INICIADO", "No iniciado"
 
     equipo = models.CharField(max_length=120, blank=True)
     pid = models.PositiveIntegerField(null=True, blank=True)
     iniciado = models.DateTimeField(null=True, blank=True)
     ultimo_latido = models.DateTimeField(null=True, blank=True)
     ejecucion = models.ForeignKey(Ejecucion, on_delete=models.SET_NULL, null=True, blank=True)
+    habilitado = models.BooleanField(default=True)
+    cambiado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True
+    )
+    cambiado = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         verbose_name = "estado del worker"
@@ -233,8 +248,37 @@ class EstadoWorker(models.Model):
         return estado
 
     @property
-    def activo(self):
+    def en_linea(self):
+        """El proceso del worker está corriendo (reportó latido reciente)."""
         return bool(
             self.ultimo_latido
             and timezone.now() - self.ultimo_latido < self.LIMITE_LATIDO
         )
+
+    @property
+    def activo(self):
+        """Corriendo y habilitado: procesa la cola."""
+        return self.en_linea and self.habilitado
+
+    @property
+    def estado(self):
+        if not self.en_linea:
+            return self.Estado.NO_INICIADO
+        return self.Estado.ACTIVO if self.habilitado else self.Estado.PAUSADO
+
+    def get_estado_display(self):
+        return self.Estado(self.estado).label
+
+    @property
+    def color(self):
+        return {
+            self.Estado.ACTIVO: "success",
+            self.Estado.PAUSADO: "warning",
+            self.Estado.NO_INICIADO: "danger",
+        }[self.estado]
+
+    def cambiar(self, habilitado, usuario):
+        EstadoWorker.objects.filter(pk=self.pk).update(
+            habilitado=habilitado, cambiado_por=usuario, cambiado=timezone.now()
+        )
+        self.refresh_from_db()

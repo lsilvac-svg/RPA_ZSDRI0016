@@ -30,14 +30,17 @@ class ContextoEjecucion:
             raise Cancelado("Ejecución cancelada por un usuario")
 
     def paso(self, descripcion, accion):
-        """Ejecuta una acción SAP registrándola y validando el resultado."""
+        """Ejecuta una acción registrándola; en SAP, valida además el resultado."""
         self.verificar_cancelacion()
         self.log.info("INICIO: %s", descripcion)
-        self.sesion.esperar()
-        accion()
-        self.sesion.esperar()
-        self.sesion.verificar_barra_estado()
+        if self.sesion is not None:
+            self.sesion.esperar()
+        resultado = accion()
+        if self.sesion is not None:
+            self.sesion.esperar()
+            self.sesion.verificar_barra_estado()
         self.log.info("FIN: %s", descripcion)
+        return resultado
 
 
 class RobotSAP:
@@ -46,6 +49,9 @@ class RobotSAP:
     codigo = ""
     nombre = ""
     descripcion = ""
+    # False = el robot no abre SAP (p. ej. solo mueve archivos); no necesita
+    # login SAP y ctx.sesion es None
+    requiere_sap = True
     # Configuración permanente (la edita un administrador)
     parametros_config = ()
     # Datos de cada ejecución (se piden al pulsar "Ejecutar")

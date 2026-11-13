@@ -3,6 +3,7 @@
 Los valores sensibles o propios de cada equipo se leen del archivo .env.
 """
 import os
+import sys
 from pathlib import Path
 
 from django.core.exceptions import ImproperlyConfigured
@@ -54,6 +55,7 @@ INSTALLED_APPS = [
     "apps.core",
     "apps.cuentas",
     "apps.sap",
+    "apps.integraciones",
     "apps.robots",
 ]
 
@@ -162,6 +164,9 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 CARPETA_LOGS = BASE_DIR / "logs"
 CARPETA_LOGS.mkdir(exist_ok=True)
 
+# Las pruebas no escriben en logs/rpa.log (se mezclarían con las ejecuciones reales)
+EN_PRUEBAS = len(sys.argv) > 1 and sys.argv[1] == "test"
+
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
@@ -170,6 +175,7 @@ LOGGING = {
     },
     "handlers": {
         "consola": {"class": "logging.StreamHandler", "formatter": "simple"},
+        "nulo": {"class": "logging.NullHandler"},
         "archivo": {
             "class": "logging.handlers.RotatingFileHandler",
             "filename": CARPETA_LOGS / "rpa.log",
@@ -180,6 +186,10 @@ LOGGING = {
         },
     },
     "loggers": {
-        "rpa": {"handlers": ["consola", "archivo"], "level": "INFO"},
+        "rpa": {
+            "handlers": ["nulo"] if EN_PRUEBAS else ["consola", "archivo"],
+            "level": "INFO",
+            "propagate": not EN_PRUEBAS,
+        },
     },
 }

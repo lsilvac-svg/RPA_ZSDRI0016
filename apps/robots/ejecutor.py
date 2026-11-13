@@ -74,15 +74,21 @@ def ejecutar(ejecucion):
 
 def _ejecutar_con_reintentos(ejecucion):
     robot = ejecucion.robot
-    if robot.conexion is None:
-        raise ErrorFatal("El robot no tiene una conexión SAP asignada")
-    if not robot.conexion.activa:
-        raise ErrorFatal(f"La conexión SAP '{robot.conexion}' está inactiva")
-
     instancia = robot.clase()
+    conexion = None
+    if instancia.requiere_sap:
+        credencial = robot.credencial
+        if credencial is None:
+            raise ErrorFatal("El robot no tiene un login SAP asignado")
+        if not credencial.activa:
+            raise ErrorFatal(f"El login SAP '{credencial}' está inactivo")
+        if not credencial.conexion.activa:
+            raise ErrorFatal(f"La conexión SAP '{credencial.conexion}' está inactiva")
+        conexion = credencial.parametros()
+        log.info("Login SAP: %s", credencial)
+
     config = robot.config_efectiva()
     valores = params.resolver(instancia.parametros_ejecucion, ejecucion.parametros)
-    conexion = robot.conexion.parametros()
     intentos = max(robot.reintentos, 1)
 
     for intento in range(1, intentos + 1):
@@ -110,6 +116,15 @@ def _ejecutar_con_reintentos(ejecucion):
 
 
 def _intento(ejecucion, instancia, config, valores, conexion):
+    if conexion is None:  # robot sin SAP
+        return instancia.ejecutar(ContextoEjecucion(
+            sesion=None,
+            config=config,
+            parametros=valores,
+            log=log,
+            cancelacion_solicitada=lambda: _cancelacion_solicitada(ejecucion),
+        ))
+
     vigilante = VigilanteSeguridad(
         instancia.carpetas_autorizadas(config),
         permitir_abrir=instancia.permitir_abrir_archivos(config),

@@ -1,6 +1,8 @@
 from django import forms
+from django.db.models import Q
 
 from apps.core.forms import BootstrapFormMixin
+from apps.sap.models import CredencialSAP
 
 from .models import Ejecucion, Programacion, Robot
 
@@ -10,8 +12,18 @@ class RobotForm(BootstrapFormMixin, forms.ModelForm):
 
     class Meta:
         model = Robot
-        fields = ["nombre", "descripcion", "conexion", "activo", "reintentos", "espera_entre_intentos"]
+        fields = ["nombre", "descripcion", "credencial", "activo", "reintentos", "espera_entre_intentos"]
         widgets = {"descripcion": forms.Textarea(attrs={"rows": 2})}
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Logins activos, más el actual aunque esté inactivo (para no perderlo al guardar)
+        consulta = CredencialSAP.objects.select_related("conexion")
+        filtro = Q(activa=True, conexion__activa=True)
+        if self.instance.credencial_id:
+            filtro |= Q(pk=self.instance.credencial_id)
+        self.fields["credencial"].queryset = consulta.filter(filtro)
+        self.fields["credencial"].empty_label = "Sin login SAP"
 
 
 class ProgramacionForm(BootstrapFormMixin, forms.ModelForm):

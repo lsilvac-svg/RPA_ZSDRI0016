@@ -72,9 +72,17 @@ class ConectorSAP:
 
         self._connection = connection
         self._conexion_propia = True
-        self._sesion = SesionSAP(connection.Children(0), self.p.tiempo_espera)
-        self._sesion.esperar()
-        self._iniciar_sesion(self._sesion, usuario)
+        try:
+            self._sesion = SesionSAP(
+                self._primera_sesion(connection), self.p.tiempo_espera
+            )
+            self._sesion.esperar()
+            self._iniciar_sesion(self._sesion, usuario)
+        except BaseException:
+            # __exit__ no se ejecuta si abrir() falla: cerrar aquí para no
+            # dejar ventanas de login huérfanas en SAP Logon
+            self.cerrar()
+            raise
         return self._sesion
 
     def _motor_scripting(self):
@@ -119,11 +127,45 @@ class ConectorSAP:
                 pass
         raise ErrorSAP("SAP Logon no respondió a tiempo")
 
+    def _primera_sesion(self, connection):
+        """Espera a que SAP cree la sesión ses[0] de una conexión recién abierta.
+
+        OpenConnection puede devolver la conexión antes de que exista la
+        sesión; leer Children(0) en ese momento produce el error COM 614.
+        """
+        limite = time.monotonic() + self.p.tiempo_espera
+        while True:
+            try:
+                if connection.Children.Count > 0:
+                    return connection.Children(0)
+                if connection.DisabledByServer:
+                    # Error reintentable: con balanceo de carga, otro intento
+                    # puede caer en un servidor de aplicación que sí lo permite
+                    raise ErrorSAP(
+                        "El servidor SAP no permite scripting en esta conexión "
+                        "(parámetro sapgui/user_scripting del servidor de "
+                        "aplicación). Si se repite, pedir a Basis que lo "
+                        "habilite en todos los servidores"
+                    )
+            except pywintypes.com_error:
+                pass  # la colección aún se está creando
+            if time.monotonic() > limite:
+                raise ErrorSAP(
+                    f"La conexión '{self.p.conexion_logon}' se abrió pero SAP "
+                    "no creó ninguna sesión (revisar ventanas emergentes de "
+                    "SAP Logon o la red)"
+                )
+            time.sleep(0.5)
+
     def _conexion_existente(self, application, usuario):
         for i in range(application.Children.Count):
-            connection = application.Children(i)
-            if connection.Description != self.p.conexion_logon:
-                continue
+            try:
+                connection = application.Children(i)
+                if connection.Description != self.p.conexion_logon:
+                    continue
+            except pywintypes.com_error:
+                continue  # conexión cerrándose
+
             for j in range(connection.Children.Count):
                 try:
                     if connection.Children(j).Info.User.upper() == usuario:
@@ -174,7 +216,7 @@ class ConectorSAP:
             if sesion.existe(CAMPO_CLAVE_NUEVA):
                 raise ErrorFatal(
                     "SAP solicita cambiar la contraseña. Cambiarla manualmente "
-                    "y actualizarla en Conexiones SAP"
+                    "y actualizarla en su login de Conexiones SAP"
                 )
             if sesion.existe(OPCION_MULTI_LOGON):
                 self._resolver_entrada_multiple(sesion, usuario)
@@ -201,7 +243,7 @@ class ConectorSAP:
             raise ErrorFatal(
                 f"{usuario} ya tiene una sesión abierta en otro equipo "
                 f"({detalle}). Cerrarla o activar 'Finalizar otras sesiones' "
-                "en la conexión SAP"
+                "en el login SAP"
             )
         self.log.warning("Se finalizan las otras sesiones de %s: %s", usuario, detalle)
         sesion.com.findById(OPCION_MULTI_LOGON).select()

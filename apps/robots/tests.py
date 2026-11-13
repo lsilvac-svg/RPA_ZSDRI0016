@@ -7,13 +7,22 @@ from django.urls import reverse
 from django.utils import timezone
 
 from apps.cuentas.models import Usuario
-from apps.sap.models import ConexionSAP
+from apps.sap.models import ConexionSAP, CredencialSAP
 from apps.sap.motor import ErrorSAP, SinDatos
 
 from . import ejecutor, planificador, registro
 from .base import Resultado, RobotSAP
 from .models import Ejecucion, EstadoWorker, Programacion, Robot
 from .parametros import Parametro, Tipo, construir_formulario, resolver, serializar
+
+
+def crear_credencial(usuario="RPA", conexion=None):
+    if conexion is None:
+        conexion = ConexionSAP.objects.create(nombre="Prueba", conexion_logon="PRD")
+    credencial = CredencialSAP(conexion=conexion, usuario=usuario)
+    credencial.clave = "x"
+    credencial.save()
+    return credencial
 
 
 def local(*args):
@@ -130,11 +139,8 @@ def sap_simulado():
 class EjecutorTests(TestCase):
     def setUp(self):
         registro.registrar(RobotFalso)
-        conexion = ConexionSAP(nombre="Prueba", conexion_logon="PRD", usuario="RPA")
-        conexion.clave = "x"
-        conexion.save()
         self.robot = Robot.objects.create(
-            codigo="FALSO", nombre="Robot falso", conexion=conexion,
+            codigo="FALSO", nombre="Robot falso", credencial=crear_credencial(),
             reintentos=2, espera_entre_intentos=0,
         )
 
@@ -172,20 +178,41 @@ class EjecutorTests(TestCase):
         self.assertEqual(ejecucion.estado, Ejecucion.Estado.CANCELADA)
 
     def test_sin_conexion_falla_sin_intentar(self):
-        self.robot.conexion = None
+        self.robot.credencial = None
         self.robot.save()
         ejecucion = self._ejecutar("ok")
         self.assertEqual(ejecucion.estado, Ejecucion.Estado.FALLIDA)
         self.assertEqual(ejecucion.intentos, 0)
 
+    def test_login_inactivo_falla_sin_intentar(self):
+        CredencialSAP.objects.update(activa=False)
+        self.robot.refresh_from_db()
+        ejecucion = self._ejecutar("ok")
+        self.assertEqual(ejecucion.estado, Ejecucion.Estado.FALLIDA)
+        self.assertEqual(ejecucion.intentos, 0)
+        self.assertIn("inactivo", ejecucion.mensaje)
+
+    def test_cada_robot_entra_con_su_login(self):
+        otro = crear_credencial("RPA_VENTAS", self.robot.credencial.conexion)
+        self.robot.credencial = otro
+        self.robot.save()
+        ejecucion = Ejecucion.objects.create(robot=self.robot, parametros={"modo": "ok"})
+        with sap_simulado() as sesion, mock.patch.object(ejecutor, "ConectorSAP") as conector:
+            conector.return_value.__enter__.return_value = sesion
+            ejecutor.ejecutar(ejecucion)
+        ejecucion.refresh_from_db()
+        self.assertEqual(ejecucion.estado, Ejecucion.Estado.EXITOSA)
+        parametros = conector.call_args.args[0]
+        self.assertEqual(parametros.usuario, "RPA_VENTAS")
+        self.assertEqual(parametros.conexion_logon, "PRD")
+
 
 class VistasEjecucionTests(TestCase):
     def setUp(self):
         registro.registrar(RobotFalso)
-        conexion = ConexionSAP(nombre="Prueba", conexion_logon="PRD", usuario="RPA")
-        conexion.clave = "x"
-        conexion.save()
-        self.robot = Robot.objects.create(codigo="FALSO", nombre="Robot falso", conexion=conexion)
+        self.robot = Robot.objects.create(
+            codigo="FALSO", nombre="Robot falso", credencial=crear_credencial()
+        )
         self.usuario = Usuario.objects.create_user("usuario@ipesa.com.pe", "x")
         self.otro = Usuario.objects.create_user("otro@ipesa.com.pe", "x")
 

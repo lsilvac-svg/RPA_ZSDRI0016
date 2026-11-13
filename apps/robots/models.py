@@ -4,7 +4,7 @@ from django.conf import settings
 from django.db import models
 from django.utils import timezone
 
-from apps.sap.models import ConexionSAP
+from apps.sap.models import CredencialSAP
 
 from . import parametros, registro
 
@@ -16,9 +16,10 @@ class Robot(models.Model):
     nombre = models.CharField(max_length=120)
     descripcion = models.TextField(blank=True)
     activo = models.BooleanField(default=True)
-    conexion = models.ForeignKey(
-        ConexionSAP, on_delete=models.PROTECT, null=True, blank=True,
-        verbose_name="conexión SAP",
+    credencial = models.ForeignKey(
+        CredencialSAP, on_delete=models.PROTECT, null=True, blank=True,
+        related_name="robots", verbose_name="login SAP",
+        help_text="Usuario SAP con el que entra este robot.",
     )
     configuracion = models.JSONField(default=dict, blank=True)
     reintentos = models.PositiveSmallIntegerField(
@@ -42,6 +43,17 @@ class Robot(models.Model):
     @property
     def instalado(self):
         return self.codigo in registro.todos()
+
+    @property
+    def requiere_sap(self):
+        if not self.instalado:
+            return True
+        return self.clase.requiere_sap
+
+    @property
+    def conexion(self):
+        """Conexión SAP del login asignado (o None)."""
+        return self.credencial.conexion if self.credencial else None
 
     def config_efectiva(self):
         return parametros.resolver(self.clase.parametros_config, self.configuracion)

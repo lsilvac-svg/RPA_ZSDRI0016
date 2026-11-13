@@ -11,7 +11,7 @@ El primer robot incluido es **ZSDRI0016** (Reporte SD-FI de Venta Unidades Repue
 - **Ejecuciones:** historial con filtros, detalle con log completo, captura de pantalla del error, cancelar y reintentar.
 - **Robots:** catálogo y "Ejecutar ahora" con parámetros (por ejemplo, rango de fechas).
 - **Programaciones:** ejecuciones automáticas diarias, semanales o mensuales.
-- **Conexiones SAP:** sistemas y credenciales, con la contraseña cifrada en la base de datos.
+- **Conexiones SAP:** sistemas (entradas de SAP Logon) y sus **logins** (usuario + contraseña cifrada en la base de datos). Cada robot elige con qué login entra, así distintos RPAs pueden usar usuarios SAP diferentes.
 - **Usuarios:** alta, edición y perfiles.
 
 ### Perfiles
@@ -31,7 +31,7 @@ config/                    Configuración Django (settings, urls, wsgi)
 apps/
   core/                    Layout con sidebar, panel, cifrado, estilos
   cuentas/                 Usuario por correo, perfiles, login por dominio
-  sap/                     Conexiones SAP (modelo + pantallas)
+  sap/                     Conexiones SAP y logins (modelos + pantallas)
     motor/                 Librería SAP GUI reutilizable (sin Django)
       conexion.py            abrir SAP Logon, login, sesión ya abierta, cierre
       sesion.py              esperas, escribir, presionar, barra de estado, capturas
@@ -69,55 +69,134 @@ El worker no puede ir en Docker: SAP GUI solo funciona en Windows, con sesión d
 
 Cada ejecución, sin que el robot tenga que programarlo:
 1. Abre SAP Logon si hace falta y desactiva el aviso "Un script está intentando acceder a SAP GUI".
-2. Si el usuario SAP ya tiene sesión en este equipo, abre un modo nuevo dentro de ella. Si no, inicia sesión. Si la sesión está en otro equipo, la finaliza según la configuración de la conexión.
+2. Si el usuario SAP ya tiene sesión en este equipo, abre un modo nuevo dentro de ella. Si no, inicia sesión. Si la sesión está en otro equipo, la finaliza según la configuración del login.
 3. Responde la ventana **Seguridad SAP GUI**: marca "Recordar mi decisión" y pulsa "Permitir", solo para las carpetas del robot; cualquier otro acceso lo rechaza.
 4. Registra cada paso en el log, verifica la barra de estado y permite cancelar entre pasos.
 5. Ante un error toma una captura de pantalla y reintenta. No reintenta errores definitivos como una contraseña incorrecta, para no bloquear el usuario SAP.
 6. Al final **siempre cierra la sesión SAP**, haya terminado bien o con error.
 
-## Instalación
+## Cómo levantar el proyecto
 
-Requisitos: Windows con SAP GUI 8.x y SAP GUI Scripting habilitado (`sapgui/user_scripting = TRUE` en el servidor), Python 3.14 y Docker Desktop.
+Hay dos modos. Ambos usan el mismo código y el mismo `.env`; solo cambia `DB_ENGINE`.
+
+| Modo                       | `DB_ENGINE` | Web                              | Base de datos            | Uso                        |
+|----------------------------|-------------|----------------------------------|--------------------------|----------------------------|
+| **Docker** (recomendado)   | `postgres`  | Contenedor `web` (waitress, 8030) | Contenedor `db` (PostgreSQL 17) | Producción en el equipo del robot |
+| **Sin Docker**             | `sqlite`    | `scripts\iniciar_web.bat`         | `db.sqlite3` (modo WAL)  | Desarrollo y pruebas        |
+
+En los dos modos, el **worker** corre en Windows, fuera de Docker.
+
+### 1. Requisitos previos
+
+| Requisito | Detalle |
+|-----------|---------|
+| Windows 10/11 | Con una **sesión de escritorio iniciada** por el usuario que tiene mapeada la unidad `Z:`. |
+| SAP GUI 8.x | Ruta por defecto `C:\Program Files\SAP\FrontEnd\SAPgui\saplogon.exe` (se puede cambiar en cada conexión SAP). La entrada de SAP Logon (p. ej. `PRD_HANA`) debe existir. |
+| SAP GUI Scripting en el **servidor** | Parámetro `sapgui/user_scripting = TRUE` (lo habilita Basis). |
+| SAP GUI Scripting en el **cliente** | SAP Logon → Opciones → Accesibilidad y scripts → Scripting → marcar **Habilitar scripting**. Los avisos "Un script está intentando acceder…" los desactiva el robot solo. |
+| Python **3.14** | Debe coincidir con la imagen Docker (`python:3.14-slim`). |
+| Docker Desktop | Solo para el modo Docker. Debe estar **abierto** antes de `docker compose`. |
+
+### 2. Entorno Python (ambos modos)
+
+El venv es necesario también en modo Docker, porque el worker y los comandos de administración corren en Windows.
 
 ```powershell
+cd C:\Users\<usuario>\Desktop\RPA\SAP\RPA_ZSDRI0016
 python -m venv venv
-.\venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-
-Copy-Item .env.example .env
-# Completar en .env: DJANGO_SECRET_KEY, RPA_CLAVE_CIFRADO y DB_PASSWORD (ver comentarios)
-
-docker compose up -d --build                   # web en http://localhost:8030 + PostgreSQL
-.\venv\Scripts\python.exe manage.py crear_superadmin   # contraseña de lsilvac@ipesa.com.pe
-powershell -ExecutionPolicy Bypass -File scripts\instalar_worker.ps1   # worker en Windows
+.\venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-Luego, desde la web (como administrador):
-1. **Conexiones SAP:** crear la conexión. Por ejemplo, conexión en SAP Logon `PRD_HANA`, con usuario y contraseña.
-2. **Robots → Configurar:** asignar la conexión y revisar los parámetros.
-3. **Usuarios:** dar de alta al equipo.
-4. **Programaciones** (opcional): por ejemplo, el ZSDRI0016 el día 1 de cada mes a las 07:00.
-
-### Docker
+### 3. Archivo `.env`
 
 ```powershell
-docker compose up -d --build      # levantar o actualizar tras cambios de código
-docker compose ps                 # estado
+Copy-Item .env.example .env
+```
+
+Completar los valores **en este orden**. `generar_clave_cifrado` carga Django, así que falla si todavía no hay `DJANGO_SECRET_KEY`.
+
+```powershell
+# a) DJANGO_SECRET_KEY
+.\venv\Scripts\python.exe -c "from django.core.management.utils import get_random_secret_key as k; print(k())"
+
+# b) RPA_CLAVE_CIFRADO (con DJANGO_SECRET_KEY ya guardada en .env)
+.\venv\Scripts\python.exe manage.py generar_clave_cifrado
+
+# c) DB_PASSWORD (solo modo Docker)
+.\venv\Scripts\python.exe -c "import secrets; print(secrets.token_urlsafe(24))"
+```
+
+| Variable | Valor |
+|----------|-------|
+| `DB_ENGINE` | `postgres` (Docker) o `sqlite` (sin Docker) |
+| `DB_HOST` | `127.0.0.1`. Lo usa el worker desde Windows; el contenedor web lo reemplaza por `db` automáticamente. |
+| `DJANGO_ALLOWED_HOSTS` / `DJANGO_CSRF_TRUSTED_ORIGINS` | Agregar el nombre o IP del equipo si se accede desde otras PCs (p. ej. `http://PC-RPA:8030`). |
+| `DJANGO_DEBUG` | `0`. Los estáticos los sirve WhiteNoise, no hace falta `1`. |
+
+> **Respaldar `.env`.** Si se pierde `RPA_CLAVE_CIFRADO`, las contraseñas SAP guardadas no se pueden descifrar y hay que ingresarlas de nuevo.
+
+### 4A. Levantar con Docker
+
+```powershell
+# 1. Web + PostgreSQL. El entrypoint aplica migraciones y collectstatic.
+docker compose up -d --build
+docker compose ps                  # esperar db "healthy" y web "running"
+
+# 2. Superadministrador (se conecta a PostgreSQL por 127.0.0.1:5432)
+.\venv\Scripts\python.exe manage.py crear_superadmin
+
+# 3. Worker como tarea programada (arranca oculto al iniciar sesión en Windows)
+powershell -ExecutionPolicy Bypass -File scripts\instalar_worker.ps1
+```
+
+Comandos habituales:
+
+```powershell
+docker compose up -d --build      # actualizar tras cambios de código
 docker compose logs -f web        # logs de la web
 docker compose down               # detener (los datos quedan en el volumen pgdata)
 ```
 
 - PostgreSQL se publica solo en `127.0.0.1:5432`, para el worker de este equipo.
-- La web corre en `0.0.0.0:8030`. Para acceder desde otros equipos, agregar su nombre o IP en `DJANGO_ALLOWED_HOSTS` y `DJANGO_CSRF_TRUSTED_ORIGINS`.
+- La web escucha en `0.0.0.0:8030`.
+- `./media` y `./logs` se montan en el contenedor: las capturas que guarda el worker se ven desde la web.
 
-### Sin Docker (desarrollo)
+### 4B. Levantar sin Docker (SQLite)
 
-Con `DB_ENGINE=sqlite` en `.env` todo corre en Windows con SQLite:
+Con `DB_ENGINE=sqlite` en `.env`:
 
 ```powershell
-scripts\iniciar_web.bat           # http://localhost:8030
-scripts\iniciar_worker.bat
+.\venv\Scripts\python.exe manage.py migrate            # crea db.sqlite3
+.\venv\Scripts\python.exe manage.py crear_superadmin
+scripts\iniciar_web.bat        # http://localhost:8030 (deja la consola abierta)
+scripts\iniciar_worker.bat     # en otra consola; o instalar_worker.ps1 para dejarlo como tarea
 ```
+
+### 5. Verificar que quedó funcionando
+
+1. Abrir http://localhost:8030 e ingresar con `SUPERADMIN_EMAIL` y la contraseña creada.
+2. **Monitor:** el worker debe figurar como **Activo**, con el nombre del equipo. Si dice **No iniciado**, ver [Solución de problemas](#solución-de-problemas).
+3. **Robots:** debe aparecer **Ventas ZSDRI0016**. Los robots se registran solos al abrir esta pantalla o al iniciar el worker.
+
+### 6. Configuración inicial desde la web (como administrador)
+
+1. **Conexiones SAP:** crear la conexión (p. ej. conexión en SAP Logon `PRD_HANA`) y agregarle uno o más **logins** (usuario y contraseña). Use un login distinto para cada grupo de RPAs que deba entrar con otro usuario.
+2. **Robots → Configurar:** elegir el **login SAP** del robot y revisar los parámetros (ver [Robot ZSDRI0016](#robot-zsdri0016)).
+3. **Usuarios:** dar de alta al equipo.
+4. **Programaciones** (opcional): por ejemplo, el ZSDRI0016 el día 1 de cada mes a las 07:00.
+5. **Prueba:** Robots → Ejecutar ahora y seguir el log en el **Monitor**.
+
+### Actualizar tras cambios de código
+
+```powershell
+git pull
+.\venv\Scripts\python.exe -m pip install -r requirements.txt
+docker compose up -d --build                                # web (migra sola)
+Stop-ScheduledTask  -TaskName "RPA SAP - Worker"            # reiniciar worker
+Start-ScheduledTask -TaskName "RPA SAP - Worker"
+```
+
+En modo sin Docker: `manage.py migrate` y reiniciar los dos `.bat`.
 
 ### Worker: arranque automático y control desde el panel
 
@@ -200,6 +279,50 @@ Para indicar el resultado, el robot lanza:
 
 Al ejecutarlo, si se dejan vacías las fechas se usa **el mes anterior completo**.
 
+## Robot Anticipos FBL1N
+
+Partidas de proveedores (FBL1N) con **operaciones CME** y **partidas memo** marcadas, exportadas a Excel (`xlsx`).
+
+| Parámetro (Robots → Configurar)  | Valor por defecto                                   |
+|----------------------------------|-----------------------------------------------------|
+| Carpeta de exportación           | `Y:\2026\CUENTAS POR PAGAR 2026\MASIVO\REPORTE_SAP` |
+| Prefijo del archivo              | `Anticipos_FBL1N` → `Anticipos_FBL1N_20261112.xlsx` |
+| Sociedad                         | `PE01`                                              |
+| Variante de disposición          | Indicar el **nombre** (recomendado). Si queda vacío, se elige en la lista F4 por posición (barra 14, fila 20, como en la grabación), lo que se rompe si cambian las variantes. |
+| Abrir y cerrar Excel             | Sí / Sí                                             |
+
+Al ejecutarlo se puede indicar la **fecha clave** (partidas abiertas a esa fecha); vacía = hoy. La unidad `Y:` debe estar mapeada en la sesión de Windows del worker.
+
+## Robot Proveedores Ipesa
+
+Reporte `ZMMRI0017` (lista de proveedores) filtrado por fecha de modificación (`S_AEDAT`), exportado a Excel.
+
+| Parámetro (Robots → Configurar)  | Valor por defecto                                   |
+|----------------------------------|-----------------------------------------------------|
+| Carpeta de exportación           | `Y:\2026\CUENTAS POR PAGAR 2026\MASIVO\LISTA_PROVEEDORES` |
+| Prefijo del archivo              | `Proveedores_Ipesa` → `Proveedores_Ipesa_202610.xlsx` |
+| Valor del primer campo           | Vacío: se elige la fila 4 de la lista F4 del campo donde SAP deja el cursor, como en la grabación. El log indica qué campo y qué valor; conviene escribir ese valor aquí. |
+| Abrir y cerrar Excel             | Sí / Sí                                             |
+
+Al ejecutarlo, si se dejan vacías las fechas de modificación se usa **el mes anterior completo**.
+
+## Robot Subir reportes a Drive
+
+No abre SAP (no necesita login SAP). Usa una **cuenta de servicio de Google** (menú *Cuentas de Google*: se sube su clave JSON, que se guarda cifrada).
+
+| Parte | Origen (el archivo más reciente) | Destino | Comportamiento |
+|-------|----------------------------------|---------|----------------|
+| Proveedores | `Y:\…\MASIVO\LISTA_PROVEEDORES\Proveedores_Ipesa_*.xlsx` | Hoja de Google Sheets, pestaña `Proveedores` | **Actualiza**: por *Organización compras + Proveedor + Sector*, cambia las filas que variaron, agrega las nuevas y **conserva las históricas**. La columna `Actualizado RPA` indica cuándo cambió cada fila. |
+| Reporte SAP | `Y:\…\MASIVO\REPORTE_SAP\Anticipos_FBL1N_*.xlsx` | Carpeta de Drive, archivo `Anticipos_FBL1N.xlsx` | **Reemplaza** el archivo completo (mismo enlace). |
+
+Las dos partes son independientes: si una falla o no tiene archivo, la otra igual se procesa.
+
+Configuración en Google Cloud (una vez):
+1. Crear un proyecto y habilitar **Google Drive API** y **Google Sheets API**.
+2. Crear una **cuenta de servicio** (sin roles) y descargar una **clave JSON**.
+3. Compartir con el correo de la cuenta de servicio, como **Editor**, la hoja de Sheets de proveedores y la carpeta del reporte. La cuenta de servicio no tiene espacio en "Mi unidad": la carpeta del reporte debe estar en una **Unidad compartida**, o el archivo `Anticipos_FBL1N.xlsx` debe existir antes (subido a mano) para que el robot solo lo reemplace.
+4. En la web: *Cuentas de Google → Nueva cuenta* (subir el JSON) y *Robots → Subir reportes a Drive → Configurar* (pegar la URL de la hoja y de la carpeta).
+
 ## Pruebas
 
 ```powershell
@@ -215,3 +338,25 @@ Cubren login por dominio, perfiles, cifrado, programador, parámetros, ejecutor 
 - **`.env`:** respaldarlo junto con la base, porque sin `RPA_CLAVE_CIFRADO` las contraseñas SAP no se pueden leer.
 - **Logs:** `logs/rpa.log`, que rota a los 2 MB. El log de cada ejecución se ve en la web.
 - **Capturas de errores:** `media/capturas/`.
+
+## Solución de problemas
+
+| Síntoma | Causa probable / solución |
+|---------|---------------------------|
+| `ImproperlyConfigured: Falta DJANGO_SECRET_KEY` | `.env` no existe o la variable está vacía. Ver paso 3. |
+| `Falta RPA_CLAVE_CIFRADO` al guardar una conexión SAP | Generarla con `manage.py generar_clave_cifrado` y reiniciar la web y el worker. |
+| `No se pudo descifrar un secreto` | `RPA_CLAVE_CIFRADO` cambió. Volver a ingresar las contraseñas de los logins en **Conexiones SAP**. |
+| `docker compose` → `Definir DB_PASSWORD en .env` | Falta `DB_PASSWORD` en `.env`. |
+| `docker compose` no responde | Docker Desktop no está abierto. |
+| El puerto 5432 u 8030 ya está en uso | Otro PostgreSQL u otra app. Detenerla o cambiar el puerto publicado en `docker-compose.yml`. |
+| `crear_superadmin` o el worker no conectan a PostgreSQL | El contenedor `db` no está levantado (`docker compose ps`), o `DB_HOST` no es `127.0.0.1`. |
+| Error 400 (Bad Request) al entrar desde otra PC | Agregar el host en `DJANGO_ALLOWED_HOSTS`. |
+| Error 403 CSRF al iniciar sesión desde otra PC | Agregar `http://<host>:8030` en `DJANGO_CSRF_TRUSTED_ORIGINS`. |
+| "Solo se permiten correos @ipesa.com.pe" | El login exige el dominio de `DOMINIO_CORREO`. |
+| Monitor: worker **No iniciado** | No hay sesión de Windows iniciada, la tarea no está instalada o el proceso se cayó. Revisar `logs\worker_consola.log` y la tarea "RPA SAP - Worker" en el Programador de tareas. |
+| `Ya hay un worker ejecutándose en este equipo` | Ya corre la tarea programada. Detenerla antes de usar `iniciar_worker.bat`. |
+| Monitor: worker **Pausado** | Un administrador lo pausó. Pulsar **Activar worker**. |
+| `SAP GUI Scripting no está habilitado` / el script fue rechazado | Habilitar el scripting en el cliente y en el servidor (ver requisitos). |
+| `No se encontró SAP Logon en …` | Corregir la ruta de `saplogon.exe` en la conexión SAP. |
+| `SAP solicita cambiar la contraseña` | Cambiarla manualmente en SAP y actualizarla en el login correspondiente de **Conexiones SAP**. |
+| El Excel no se guarda en `Z:` | El worker corre con un usuario o sesión sin la unidad `Z:` mapeada. Por eso el worker no se instala como "ejecutar aunque el usuario no haya iniciado sesión". |

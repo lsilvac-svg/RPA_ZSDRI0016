@@ -135,7 +135,7 @@ class Worker:
     def _siguiente(self):
         pendientes = Ejecucion.objects.filter(
             estado=Ejecucion.Estado.PENDIENTE
-        ).select_related("robot", "robot__conexion").order_by("creada")
+        ).select_related("robot", "robot__credencial__conexion").order_by("creada")
 
         for ejecucion in pendientes:
             if ejecucion.cancelacion_solicitada:

@@ -2,7 +2,8 @@ from datetime import date
 
 from django.test import SimpleTestCase, TestCase
 
-from .models import ConexionSAP
+from .forms import CredencialSAPForm
+from .models import ConexionSAP, CredencialSAP
 from .motor import fechas
 
 
@@ -24,13 +25,40 @@ class FechasTests(SimpleTestCase):
         self.assertEqual(fechas.a_sap(date(2026, 10, 1)), "01.10.2026")
 
 
-class ConexionSAPTests(TestCase):
-    def test_clave_se_guarda_cifrada(self):
-        conexion = ConexionSAP(nombre="Prueba", conexion_logon="PRD_HANA", usuario="RPA")
-        conexion.clave = "Secreta#123"
-        conexion.save()
+class CredencialSAPTests(TestCase):
+    def setUp(self):
+        self.conexion = ConexionSAP.objects.create(
+            nombre="Prueba", conexion_logon="PRD_HANA", tiempo_espera=45
+        )
 
-        guardada = ConexionSAP.objects.get(pk=conexion.pk)
+    def test_clave_se_guarda_cifrada(self):
+        credencial = CredencialSAP(conexion=self.conexion, usuario="RPA")
+        credencial.clave = "Secreta#123"
+        credencial.save()
+
+        guardada = CredencialSAP.objects.get(pk=credencial.pk)
         self.assertNotIn("Secreta", guardada.clave_cifrada)
         self.assertEqual(guardada.clave, "Secreta#123")
-        self.assertEqual(guardada.parametros().clave, "Secreta#123")
+        parametros = guardada.parametros()
+        self.assertEqual(parametros.clave, "Secreta#123")
+        self.assertEqual(parametros.usuario, "RPA")
+        self.assertEqual(parametros.conexion_logon, "PRD_HANA")
+        self.assertEqual(parametros.tiempo_espera, 45)
+
+    def test_varios_logins_por_conexion(self):
+        for usuario in ("RPA", "RPA_VENTAS"):
+            credencial = CredencialSAP(conexion=self.conexion, usuario=usuario)
+            credencial.clave = "x"
+            credencial.save()
+        self.assertEqual(self.conexion.credenciales.count(), 2)
+
+    def test_formulario_exige_clave_y_normaliza_usuario(self):
+        form = CredencialSAPForm(data={"conexion": self.conexion.pk, "usuario": " rpa2 ", "activa": True})
+        self.assertFalse(form.is_valid())
+        self.assertIn("clave", form.errors)
+
+        form = CredencialSAPForm(data={
+            "conexion": self.conexion.pk, "usuario": " rpa2 ", "clave": "x", "activa": True,
+        })
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.save().usuario, "RPA2")

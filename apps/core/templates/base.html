@@ -32,6 +32,7 @@
       <li class="nav-header">Administración</li>
       <li><a href="{% url 'robots:programaciones' %}" class="nav-link {% if 'programacion' in ruta %}active{% endif %}"><i class="bi bi-calendar-week"></i>Programaciones</a></li>
       <li><a href="{% url 'sap:lista' %}" class="nav-link {% if ruta|slice:':4' == 'sap:' %}active{% endif %}"><i class="bi bi-hdd-network"></i>Conexiones SAP</a></li>
+      <li><a href="{% url 'integraciones:lista' %}" class="nav-link {% if ruta|slice:':14' == 'integraciones:' %}active{% endif %}"><i class="bi bi-google"></i>Cuentas de Google</a></li>
       <li><a href="{% url 'cuentas:lista' %}" class="nav-link {% if ruta == 'cuentas:lista' or ruta == 'cuentas:crear' or ruta == 'cuentas:editar' %}active{% endif %}"><i class="bi bi-people"></i>Usuarios</a></li>
       <li><a href="{% url 'admin:index' %}" class="nav-link"><i class="bi bi-gear"></i>Admin Django</a></li>
       {% endif %}

@@ -5,7 +5,8 @@ from .models import Ejecucion, EstadoWorker, LogEjecucion, Programacion, Robot
 
 @admin.register(Robot)
 class RobotAdmin(admin.ModelAdmin):
-    list_display = ["codigo", "nombre", "conexion", "activo"]
+    list_display = ["codigo", "nombre", "credencial", "activo"]
+    list_select_related = ["credencial__conexion"]
     readonly_fields = ["codigo"]
 
 

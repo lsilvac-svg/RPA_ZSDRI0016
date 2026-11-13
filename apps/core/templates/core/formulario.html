@@ -7,7 +7,7 @@
 </div>
 <div class="card shadow-sm">
   <div class="card-body">
-    <form method="post" novalidate>
+    <form method="post" enctype="multipart/form-data" novalidate>
       {% csrf_token %}
       {% include "includes/campos.html" %}
       <div class="mt-4">

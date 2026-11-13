@@ -30,7 +30,7 @@ class RobotListView(ListView):
 
     def get_queryset(self):
         sincronizar_robots()
-        return Robot.objects.select_related("conexion")
+        return Robot.objects.select_related("credencial__conexion")
 
 
 class RobotDetailView(DetailView):
@@ -67,8 +67,8 @@ class RobotEjecutarView(View):
         if not robot.activo:
             messages.error(request, "El robot está inactivo.")
             return redirect("robots:detalle", pk=pk)
-        if robot.conexion is None:
-            messages.error(request, "El robot no tiene una conexión SAP asignada.")
+        if robot.requiere_sap and robot.credencial is None:
+            messages.error(request, "El robot no tiene un login SAP asignado.")
             return redirect("robots:detalle", pk=pk)
 
         definicion = robot.clase.parametros_ejecucion

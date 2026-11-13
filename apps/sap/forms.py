@@ -2,10 +2,16 @@ from django import forms
 
 from apps.core.forms import BootstrapFormMixin
 
-from .models import ConexionSAP
+from .models import ConexionSAP, CredencialSAP
 
 
 class ConexionSAPForm(BootstrapFormMixin, forms.ModelForm):
+    class Meta:
+        model = ConexionSAP
+        fields = ["nombre", "conexion_logon", "ruta_saplogon", "tiempo_espera", "activa"]
+
+
+class CredencialSAPForm(BootstrapFormMixin, forms.ModelForm):
     clave = forms.CharField(
         label="Contraseña SAP",
         required=False,
@@ -15,10 +21,10 @@ class ConexionSAPForm(BootstrapFormMixin, forms.ModelForm):
     )
 
     class Meta:
-        model = ConexionSAP
+        model = CredencialSAP
         fields = [
-            "nombre", "conexion_logon", "usuario", "clave", "ruta_saplogon",
-            "finalizar_otras_sesiones", "tiempo_espera", "activa",
+            "conexion", "usuario", "clave", "descripcion",
+            "finalizar_otras_sesiones", "activa",
         ]
 
     def clean_usuario(self):
@@ -31,9 +37,9 @@ class ConexionSAPForm(BootstrapFormMixin, forms.ModelForm):
         return datos
 
     def save(self, commit=True):
-        conexion = super().save(commit=False)
+        credencial = super().save(commit=False)
         if self.cleaned_data.get("clave"):
-            conexion.clave = self.cleaned_data["clave"]
+            credencial.clave = self.cleaned_data["clave"]
         if commit:
-            conexion.save()
-        return conexion
+            credencial.save()
+        return credencial

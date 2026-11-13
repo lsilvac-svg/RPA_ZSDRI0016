@@ -13,7 +13,7 @@
           {% elif robot.activo %}<span class="badge text-bg-success">Activo</span>
           {% else %}<span class="badge text-bg-secondary">Inactivo</span>{% endif %}
         </div>
-        <div class="text-muted small mb-2"><code>{{ robot.codigo }}</code> · {{ robot.conexion|default:"Sin conexión SAP" }}</div>
+        <div class="text-muted small mb-2"><code>{{ robot.codigo }}</code> · {% if not robot.requiere_sap %}<i class="bi bi-cloud-upload"></i> Sin SAP{% elif robot.credencial %}<i class="bi bi-person-badge"></i> {{ robot.credencial }}{% else %}Sin login SAP{% endif %}</div>
         <p class="small mb-3">{{ robot.descripcion|truncatechars:160 }}</p>
         {% with ultima=robot.ultima_ejecucion %}
         <div class="small">Última ejecución:

@@ -10,6 +10,7 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("usuarios/", include("apps.cuentas.urls")),
     path("sap/", include("apps.sap.urls")),
+    path("integraciones/", include("apps.integraciones.urls")),
     path("", include("apps.robots.urls")),
     path("", include("apps.core.urls")),
 ]

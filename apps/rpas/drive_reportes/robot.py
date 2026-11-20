@@ -3,8 +3,9 @@
 - Proveedores (LISTA_PROVEEDORES): se actualiza una hoja de Google Sheets
   histórica, fila por fila según una clave. Las filas que ya no vienen se
   conservan.
-- Reporte SAP (REPORTE_SAP): se reemplaza por completo un archivo .xlsx de
-  nombre fijo en una carpeta de Drive (mismo enlace).
+- Reportes SAP (REPORTE_SAP): FBL1N (anticipos) y FBL5N (clientes). Cada uno
+  reemplaza por completo un archivo .xlsx de nombre fijo en una carpeta de
+  Drive (mismo enlace).
 
 No abre SAP.
 """
@@ -30,7 +31,7 @@ class RobotDriveReportes(RobotSAP):
     nombre = "Subir reportes a Drive"
     descripcion = (
         "Actualiza en Google Sheets el histórico de proveedores (LISTA_PROVEEDORES) "
-        "y reemplaza en Drive el Excel del reporte SAP (REPORTE_SAP)."
+        "y reemplaza en Drive los Excel de FBL1N y FBL5N (REPORTE_SAP)."
     )
     requiere_sap = False
 
@@ -50,8 +51,8 @@ class RobotDriveReportes(RobotSAP):
         Parametro("columnas_clave", "Columnas clave (separadas por coma)",
                   defecto="Organización compras, Proveedor, Sector",
                   ayuda="Identifican cada fila: si existe se actualiza, si no se agrega."),
-        # Reporte SAP -> Drive (reemplazable)
-        Parametro("subir_reporte_sap", "Reemplazar reporte SAP en Drive",
+        # Reporte FBL1N -> Drive (reemplazable)
+        Parametro("subir_reporte_sap", "Reemplazar reporte FBL1N en Drive",
                   Tipo.BOOLEANO, defecto=True),
         Parametro("carpeta_reporte_sap", "Carpeta local del reporte SAP", Tipo.CARPETA,
                   defecto=rf"{BASE_Y}\REPORTE_SAP"),
@@ -62,23 +63,37 @@ class RobotDriveReportes(RobotSAP):
         Parametro("nombre_drive_reporte", "Nombre del archivo en Drive",
                   defecto="Anticipos_FBL1N.xlsx",
                   ayuda="Siempre el mismo, para conservar el enlace."),
+        # Reporte FBL5N -> Drive (mismo tratamiento que FBL1N)
+        Parametro("subir_fbl5n", "Reemplazar reporte FBL5N en Drive",
+                  Tipo.BOOLEANO, defecto=True),
+        Parametro("carpeta_fbl5n", "Carpeta local del reporte FBL5N", Tipo.CARPETA,
+                  defecto=rf"{BASE_Y}\REPORTE_SAP"),
+        Parametro("patron_fbl5n", "Archivos del reporte FBL5N", defecto="Archivo_FBL5N*.xlsx",
+                  ayuda="Se toma el más reciente que coincida."),
+        Parametro("carpeta_drive_fbl5n", "Carpeta de Drive del FBL5N (URL o ID)",
+                  ayuda="Vacío = la misma carpeta de Drive del reporte FBL1N."),
+        Parametro("nombre_drive_fbl5n", "Nombre del archivo FBL5N en Drive",
+                  defecto="Archivo_FBL5N.xlsx",
+                  ayuda="Siempre el mismo, para conservar el enlace."),
     )
     parametros_ejecucion = ()
 
     def ejecutar(self, ctx):
         config = ctx.config
-        if not config["subir_proveedores"] and not config["subir_reporte_sap"]:
-            raise ErrorFatal("No hay nada que subir: ambas opciones están desactivadas")
-
-        cliente = ctx.paso("Conectar con Google", lambda: self._cliente(ctx))
         tareas = []
         if config["subir_proveedores"]:
             tareas.append(("Proveedores", self._proveedores))
         if config["subir_reporte_sap"]:
-            tareas.append(("Reporte SAP", self._reporte_sap))
+            tareas.append(("FBL1N", self._reporte_fbl1n))
+        if config["subir_fbl5n"]:
+            tareas.append(("FBL5N", self._reporte_fbl5n))
+        if not tareas:
+            raise ErrorFatal("No hay nada que subir: todas las opciones están desactivadas")
 
-        # Cada parte es independiente: un error en una no impide la otra.
-        # Ambas son idempotentes, así que un reintento no duplica nada.
+        cliente = ctx.paso("Conectar con Google", lambda: self._cliente(ctx))
+
+        # Cada parte es independiente: un error en una no impide las otras.
+        # Todas son idempotentes, así que un reintento no duplica nada.
         mensajes, errores, sin_datos = [], [], 0
         for nombre, tarea in tareas:
             try:
@@ -154,21 +169,41 @@ class RobotDriveReportes(RobotSAP):
         ctx.log.info(mensaje)
         return mensaje
 
-    def _reporte_sap(self, ctx, cliente):
+    def _reporte_fbl1n(self, ctx, cliente):
         config = ctx.config
-        carpeta_id = extraer_id(config["carpeta_drive_reporte"])
-        if not carpeta_id:
-            raise ErrorFatal("Falta la carpeta de Drive del reporte SAP en Configurar")
-        nombre = config["nombre_drive_reporte"] or "Anticipos_FBL1N.xlsx"
+        return self._reemplazar_en_drive(
+            ctx, cliente, "FBL1N",
+            carpeta_local=config["carpeta_reporte_sap"],
+            patron=config["patron_reporte_sap"],
+            carpeta_drive=config["carpeta_drive_reporte"],
+            nombre=config["nombre_drive_reporte"] or "Anticipos_FBL1N.xlsx",
+        )
 
-        ruta = self._mas_reciente(ctx, config["carpeta_reporte_sap"], config["patron_reporte_sap"])
+    def _reporte_fbl5n(self, ctx, cliente):
+        config = ctx.config
+        return self._reemplazar_en_drive(
+            ctx, cliente, "FBL5N",
+            carpeta_local=config["carpeta_fbl5n"],
+            patron=config["patron_fbl5n"],
+            carpeta_drive=config["carpeta_drive_fbl5n"] or config["carpeta_drive_reporte"],
+            nombre=config["nombre_drive_fbl5n"] or "Archivo_FBL5N.xlsx",
+        )
+
+    def _reemplazar_en_drive(self, ctx, cliente, etiqueta, carpeta_local, patron,
+                             carpeta_drive, nombre):
+        """Sube el Excel local más reciente y reemplaza el archivo de nombre fijo en Drive."""
+        carpeta_id = extraer_id(carpeta_drive)
+        if not carpeta_id:
+            raise ErrorFatal(f"Falta la carpeta de Drive del reporte {etiqueta} en Configurar")
+
+        ruta = self._mas_reciente(ctx, carpeta_local, patron)
         contenido = ctx.paso(f"Leer {ruta.name}", ruta.read_bytes)
         archivo, creado = ctx.paso(
             f"Subir {ruta.name} a Drive como {nombre}",
             lambda: cliente.reemplazar_archivo(carpeta_id, nombre, contenido),
         )
         accion = "creado" if creado else "reemplazado"
-        mensaje = f"Reporte SAP {accion} en Drive: {nombre} ({ruta.name})"
+        mensaje = f"{etiqueta} {accion} en Drive: {nombre} ({ruta.name})"
         ctx.log.info("%s %s", mensaje, archivo.get("webViewLink", ""))
         return mensaje
 

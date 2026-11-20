@@ -4,6 +4,7 @@ import logging
 from datetime import datetime, timedelta
 
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 log = logging.getLogger("rpa.planificador")
@@ -39,32 +40,53 @@ def _corresponde(programacion, dia, frecuencia):
 
 def encolar_vencidas(ahora=None):
     """Crea ejecuciones para las programaciones cuya hora ya llegó."""
-    from .models import Ejecucion, Programacion
+    from .models import Programacion
 
     ahora = ahora or timezone.now()
     vencidas = Programacion.objects.filter(
-        activa=True, proxima_ejecucion__lte=ahora, robot__activo=True
-    ).select_related("robot")
+        Q(robot__activo=True) | Q(orquestador__activo=True),
+        activa=True, proxima_ejecucion__lte=ahora,
+    ).select_related("robot", "orquestador")
 
     creadas = 0
     for programacion in vencidas:
         with transaction.atomic():
-            ya_en_cola = Ejecucion.objects.filter(
-                robot=programacion.robot, estado__in=Ejecucion.ESTADOS_ACTIVOS
-            ).exists()
-            if ya_en_cola:
-                log.warning(
-                    "Programación '%s' omitida: el robot ya tiene una ejecución en curso",
-                    programacion,
-                )
+            if programacion.orquestador_id:
+                creadas += _lanzar_orquestador(programacion)
             else:
-                Ejecucion.objects.create(
-                    robot=programacion.robot,
-                    origen=Ejecucion.Origen.PROGRAMADA,
-                    programacion=programacion,
-                )
-                creadas += 1
-
+                creadas += _encolar_robot(programacion)
             programacion.ultima_ejecucion = ahora
             programacion.save()  # recalcula la próxima ejecución
     return creadas
+
+
+def _encolar_robot(programacion):
+    from .models import Ejecucion
+    from .orquestacion import robot_ocupado
+
+    motivo = robot_ocupado(programacion.robot)
+    if motivo:
+        log.warning("Programación '%s' omitida: %s", programacion, motivo)
+        return 0
+    Ejecucion.objects.create(
+        robot=programacion.robot,
+        origen=Ejecucion.Origen.PROGRAMADA,
+        programacion=programacion,
+        parametros=programacion.parametros or {},
+    )
+    return 1
+
+
+def _lanzar_orquestador(programacion):
+    from . import orquestacion
+    from .models import Ejecucion
+
+    try:
+        orquestacion.iniciar(
+            programacion.orquestador, origen=Ejecucion.Origen.PROGRAMADA,
+            programacion=programacion,
+        )
+    except orquestacion.OrquestadorNoDisponible as motivo:
+        log.warning("Programación '%s' omitida: %s", programacion, motivo)
+        return 0
+    return 1

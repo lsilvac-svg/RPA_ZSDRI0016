@@ -14,6 +14,7 @@ from apps.sap.motor import Cancelado, ErrorFatal, SinDatos
 from apps.sap.motor.conexion import ConectorSAP
 from apps.sap.motor.seguridad import VigilanteSeguridad
 
+from . import orquestacion
 from . import parametros as params
 from .base import ContextoEjecucion
 from .models import Ejecucion, LogEjecucion
@@ -70,6 +71,7 @@ def ejecutar(ejecucion):
         log.info("===== Fin: %s =====", Ejecucion.Estado(estado).label)
 
     _actualizar(ejecucion, estado=estado, mensaje=mensaje, archivo=archivo, fin=timezone.now())
+    orquestacion.avanzar(ejecucion)
 
 
 def _ejecutar_con_reintentos(ejecucion):

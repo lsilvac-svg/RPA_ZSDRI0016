@@ -34,6 +34,16 @@ class RobotFbl1nAnticiposTests(SimpleTestCase):
         config = resolver(RobotFbl1nAnticipos.parametros_config, {})
         self.assertEqual(config["carpeta_exportacion"], r"Y:\2026\CUENTAS POR PAGAR 2026\MASIVO\REPORTE_SAP")
         self.assertEqual(config["sociedad"], "PE01")
+        self.assertEqual(config["variante"], "/CXP EDWIN")
+
+    def test_usa_variante_por_defecto(self):
+        self.sesion.existe.side_effect = lambda id_: (
+            id_ == modulo.CAMPO_SOCIEDAD and not self.sesion.tecla.called
+        )
+        with mock.patch.object(modulo.alv, "exportar_excel", return_value="Y:/x.xlsx"), \
+                mock.patch.object(modulo.archivos, "cerrar_excel"):
+            RobotFbl1nAnticipos().ejecutar(contexto(self.sesion))
+        self.sesion.escribir.assert_any_call(modulo.CAMPO_VARIANTE, "/CXP EDWIN")
 
     def test_flujo_completo_con_variante_por_nombre(self):
         # Tras abrir la FBL1N existe la pantalla de selección; tras F8, el listado

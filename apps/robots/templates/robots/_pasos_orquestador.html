@@ -1,0 +1,20 @@
+{% if orquestador %}
+  {% with pasos=orquestador.pasos.all %}
+  {% if pasos %}
+  <p class="small text-muted mb-2">A la hora programada arranca la cadena y estos robots se ejecutan en este orden, cada uno con los parámetros de su paso. El siguiente arranca cuando termina el anterior (exitoso o sin datos); si uno falla, la cadena se detiene.</p>
+  <ol class="list-group list-group-numbered">
+    {% for paso in pasos %}
+    <li class="list-group-item">
+      <span class="fw-semibold">{{ paso.robot }}</span>
+      {% for etiqueta, valor in paso.parametros_legibles %}<div class="small ms-3"><span class="text-muted">{{ etiqueta }}:</span> {{ valor }}</div>{% endfor %}
+    </li>
+    {% endfor %}
+  </ol>
+  <a href="{% url 'robots:orquestador' orquestador.pk %}" class="small d-inline-block mt-2" target="_blank"><i class="bi bi-pencil"></i> Cambiar pasos o parámetros en el orquestador</a>
+  {% else %}
+  <div class="alert alert-warning mb-0">Este orquestador no tiene pasos. <a href="{% url 'robots:orquestador' orquestador.pk %}">Agregar pasos</a></div>
+  {% endif %}
+  {% endwith %}
+{% else %}
+  <p class="text-muted mb-0">Elija un orquestador para ver los robots que ejecutará.</p>
+{% endif %}

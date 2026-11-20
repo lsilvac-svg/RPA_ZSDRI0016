@@ -277,7 +277,30 @@ Para indicar el resultado, el robot lanza:
 | Transacción / texto menú / favorito | `ZSDRI0016` / `ZSDRI0016` / `F00007`            |
 | Abrir y cerrar Excel             | Sí / Sí (no toca otros libros abiertos)             |
 
-Al ejecutarlo, si se dejan vacías las fechas se usa **el mes anterior completo**.
+Parámetros de cada ejecución (al ejecutar a mano, en cada programación y en cada paso de orquestador):
+
+| Parámetro               | Uso                                                                 |
+|-------------------------|---------------------------------------------------------------------|
+| Periodo                 | **Mes anterior completo** (defecto) o **Mes en curso** (del día 1 a hoy). |
+| Fecha desde / hasta     | Opcionales: si se indican, reemplazan el inicio / fin del periodo.  |
+| Nombre fijo del archivo | P. ej. `Ventas_Mes_Actual` → siempre `Ventas_Mes_Actual.xlsx`, reemplazado en cada ejecución, para que el origen de datos de Excel/Power BI no cambie. Vacío = prefijo + periodo. |
+
+Ejemplo: programación diaria a las 07:00 con *Periodo = Mes en curso* y *Nombre fijo = Ventas_Mes_Actual*.
+
+## Orquestadores
+
+Menú **Orquestadores**: cadenas de robots que se ejecutan una tras otra. Se pueden crear varios.
+
+- Cada paso es un robot con sus propios parámetros de ejecución. El orden se cambia con las flechas.
+- Al ejecutar (a mano o con una programación) se encola el paso 1. **El paso siguiente se encola si el anterior terminó *Exitoso* o *Sin datos***; si falla o se cancela, la cadena queda **Detenida** (o *Cancelada*) y no corren los pasos restantes.
+- El paso siguiente corre apenas termina el anterior: hereda el lugar de la cadena en la cola y no espera detrás de ejecuciones encoladas mientras tanto.
+- Un orquestador no se puede iniciar si ya tiene una cadena en curso, si no tiene pasos o si algún robot está inactivo, sin login SAP u ocupado.
+
+**Sin encolamientos duplicados:** un robot no se encola (programación, ejecución manual, reintento o inicio de cadena) si ya está en cola, ejecutándose o tiene un paso pendiente en una cadena activa. La programación omitida queda en el log del worker y se reprograma para su siguiente fecha.
+- En **Cadena #N** se ve el avance paso a paso (se actualiza solo) y se puede cancelar la cadena.
+- En **Programaciones** hay dos botones:
+  - **Programar robot**: un robot suelto, con sus parámetros de ejecución.
+  - **Programar orquestador**: solo se elige el orquestador, la frecuencia y la hora. No se piden parámetros por robot: a esa hora arranca la cadena y todos sus robots corren en el orden de los pasos, cada uno con los parámetros definidos en su paso. No hace falta programar cada robot por separado.
 
 ## Robot Anticipos FBL1N
 
@@ -286,12 +309,29 @@ Partidas de proveedores (FBL1N) con **operaciones CME** y **partidas memo** marc
 | Parámetro (Robots → Configurar)  | Valor por defecto                                   |
 |----------------------------------|-----------------------------------------------------|
 | Carpeta de exportación           | `Y:\2026\CUENTAS POR PAGAR 2026\MASIVO\REPORTE_SAP` |
-| Prefijo del archivo              | `Anticipos_FBL1N` → `Anticipos_FBL1N_20261112.xlsx` |
+| Nombre del archivo               | `Anticipos_FBL1N_2026` (cada ejecución reemplaza el archivo) |
+| Agregar la fecha clave al nombre | No (Sí → `Anticipos_FBL1N_2026_20261112.xlsx`)      |
 | Sociedad                         | `PE01`                                              |
-| Variante de disposición          | Indicar el **nombre** (recomendado). Si queda vacío, se elige en la lista F4 por posición (barra 14, fila 20, como en la grabación), lo que se rompe si cambian las variantes. |
+| Variante de disposición          | `/CXP EDWIN` (obligatoria; nombre exacto de la variante en SAP) |
 | Abrir y cerrar Excel             | Sí / Sí                                             |
 
 Al ejecutarlo se puede indicar la **fecha clave** (partidas abiertas a esa fecha); vacía = hoy. La unidad `Y:` debe estar mapeada en la sesión de Windows del worker.
+
+## Robot Partidas de clientes FBL5N
+
+Partidas de clientes (FBL5N) con **operaciones CME** y **partidas memo** marcadas, exportadas a Excel (`xlsx`) con **nombre fijo**. De la grabación original solo se usa la segunda descarga (*Lista → Exportar → Hoja de cálculo*, formato `xlsx-TT`); la primera (*Grabar → Fichero local*) no funcionaba y se eliminó.
+
+| Parámetro (Robots → Configurar)  | Valor por defecto                                   |
+|----------------------------------|-----------------------------------------------------|
+| Carpeta de exportación           | `Y:\2026\CUENTAS POR PAGAR 2026\MASIVO\REPORTE_SAP` |
+| Nombre del archivo               | `Archivo_FBL5N` → `Archivo_FBL5N.xlsx` (cada ejecución lo reemplaza) |
+| Sociedad                         | `PE01`                                              |
+| Operaciones CME / Partidas memo  | Sí / Sí                                             |
+| Variante de disposición          | `/CXC EDWIN` (obligatoria; nombre exacto de la variante en SAP) |
+| Tiempo máximo del reporte        | 900 s                                               |
+| Abrir y cerrar Excel             | Sí / Sí                                             |
+
+Al ejecutarlo se puede indicar la **fecha clave** (partidas abiertas a esa fecha); vacía = hoy.
 
 ## Robot Proveedores Ipesa
 
@@ -313,14 +353,17 @@ No abre SAP (no necesita login SAP). Usa una **cuenta de servicio de Google** (m
 | Parte | Origen (el archivo más reciente) | Destino | Comportamiento |
 |-------|----------------------------------|---------|----------------|
 | Proveedores | `Y:\…\MASIVO\LISTA_PROVEEDORES\Proveedores_Ipesa_*.xlsx` | Hoja de Google Sheets, pestaña `Proveedores` | **Actualiza**: por *Organización compras + Proveedor + Sector*, cambia las filas que variaron, agrega las nuevas y **conserva las históricas**. La columna `Actualizado RPA` indica cuándo cambió cada fila. |
-| Reporte SAP | `Y:\…\MASIVO\REPORTE_SAP\Anticipos_FBL1N_*.xlsx` | Carpeta de Drive, archivo `Anticipos_FBL1N.xlsx` | **Reemplaza** el archivo completo (mismo enlace). |
+| FBL1N | `Y:\…\MASIVO\REPORTE_SAP\Anticipos_FBL1N_*.xlsx` | Carpeta de Drive, archivo `Anticipos_FBL1N.xlsx` | **Reemplaza** el archivo completo (mismo enlace). |
+| FBL5N | `Y:\…\MASIVO\REPORTE_SAP\Archivo_FBL5N*.xlsx` | Carpeta de Drive del FBL5N (vacía = la misma de FBL1N), archivo `Archivo_FBL5N.xlsx` | **Reemplaza** el archivo completo (mismo enlace), igual que FBL1N. |
 
-Las dos partes son independientes: si una falla o no tiene archivo, la otra igual se procesa.
+Las tres partes son independientes: si una falla o no tiene archivo, las otras igual se procesan. Cada una se puede desactivar en *Configurar*.
+
+Ejemplo de orquestador: *Anticipos FBL1N* → *Partidas de clientes FBL5N* → *Subir reportes a Drive*.
 
 Configuración en Google Cloud (una vez):
 1. Crear un proyecto y habilitar **Google Drive API** y **Google Sheets API**.
 2. Crear una **cuenta de servicio** (sin roles) y descargar una **clave JSON**.
-3. Compartir con el correo de la cuenta de servicio, como **Editor**, la hoja de Sheets de proveedores y la carpeta del reporte. La cuenta de servicio no tiene espacio en "Mi unidad": la carpeta del reporte debe estar en una **Unidad compartida**, o el archivo `Anticipos_FBL1N.xlsx` debe existir antes (subido a mano) para que el robot solo lo reemplace.
+3. Compartir con el correo de la cuenta de servicio, como **Editor**, la hoja de Sheets de proveedores y la carpeta del reporte. La cuenta de servicio no tiene espacio en "Mi unidad": la carpeta del reporte debe estar en una **Unidad compartida**, o los archivos `Anticipos_FBL1N.xlsx` y `Archivo_FBL5N.xlsx` deben existir antes (subido a mano) para que el robot solo lo reemplace.
 4. En la web: *Cuentas de Google → Nueva cuenta* (subir el JSON) y *Robots → Subir reportes a Drive → Configurar* (pegar la URL de la hoja y de la carpeta).
 
 ## Pruebas

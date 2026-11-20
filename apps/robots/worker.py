@@ -12,11 +12,12 @@ import threading
 import time
 
 from django.db import DatabaseError, close_old_connections, connection
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from apps.sap.motor.windows import exigir_windows, win32api, win32event, winerror
 
-from . import ejecutor, planificador
+from . import ejecutor, orquestacion, planificador
 from .models import Ejecucion, EstadoWorker, sincronizar_robots
 
 log = logging.getLogger("rpa.worker")
@@ -27,6 +28,31 @@ INTERVALO_LATIDO = 10
 
 class WorkerYaEnEjecucion(Exception):
     pass
+
+
+def siguiente_pendiente():
+    """Próxima ejecución a procesar.
+
+    Los pasos de un orquestador toman la posición en la cola de su cadena,
+    así el robot siguiente corre apenas termina el anterior y no espera
+    detrás de ejecuciones encoladas mientras tanto.
+    """
+    pendientes = (
+        Ejecucion.objects.filter(estado=Ejecucion.Estado.PENDIENTE)
+        .select_related("robot", "robot__credencial__conexion")
+        .annotate(posicion=Coalesce("cadena__creada", "creada"))
+        .order_by("posicion", "creada")
+    )
+    for ejecucion in pendientes:
+        if ejecucion.cancelacion_solicitada:
+            Ejecucion.objects.filter(pk=ejecucion.pk).update(
+                estado=Ejecucion.Estado.CANCELADA, fin=timezone.now()
+            )
+            ejecucion.estado = Ejecucion.Estado.CANCELADA
+            orquestacion.avanzar(ejecucion)
+            continue
+        return ejecucion
+    return None
 
 
 class Latido(threading.Thread):
@@ -115,13 +141,17 @@ class Worker:
 
     def _recuperar_interrumpidas(self):
         # Ejecuciones que quedaron "ejecutando" si el worker se cerró de golpe
-        cantidad = Ejecucion.objects.filter(estado=Ejecucion.Estado.EJECUTANDO).update(
+        interrumpidas = list(Ejecucion.objects.filter(estado=Ejecucion.Estado.EJECUTANDO))
+        Ejecucion.objects.filter(pk__in=[e.pk for e in interrumpidas]).update(
             estado=Ejecucion.Estado.FALLIDA,
             fin=timezone.now(),
             mensaje="Interrumpida: el worker se detuvo durante la ejecución",
         )
-        if cantidad:
-            log.warning("%s ejecuciones interrumpidas marcadas como fallidas", cantidad)
+        for ejecucion in interrumpidas:
+            ejecucion.refresh_from_db()
+            orquestacion.avanzar(ejecucion)  # detiene su cadena, si tiene
+        if interrumpidas:
+            log.warning("%s ejecuciones interrumpidas marcadas como fallidas", len(interrumpidas))
 
     def _registrar_inicio(self):
         EstadoWorker.obtener()
@@ -133,18 +163,7 @@ class Worker:
         )
 
     def _siguiente(self):
-        pendientes = Ejecucion.objects.filter(
-            estado=Ejecucion.Estado.PENDIENTE
-        ).select_related("robot", "robot__credencial__conexion").order_by("creada")
-
-        for ejecucion in pendientes:
-            if ejecucion.cancelacion_solicitada:
-                Ejecucion.objects.filter(pk=ejecucion.pk).update(
-                    estado=Ejecucion.Estado.CANCELADA, fin=timezone.now()
-                )
-                continue
-            return ejecucion
-        return None
+        return siguiente_pendiente()
 
     def _procesar(self, ejecucion):
         EstadoWorker.objects.filter(pk=1).update(ejecucion=ejecucion)

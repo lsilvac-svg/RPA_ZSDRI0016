@@ -4,7 +4,8 @@ from django.db.models import Q
 from apps.core.forms import BootstrapFormMixin
 from apps.sap.models import CredencialSAP
 
-from .models import Ejecucion, Programacion, Robot
+from . import registro
+from .models import Ejecucion, Orquestador, PasoOrquestador, Programacion, Robot
 
 
 class RobotForm(BootstrapFormMixin, forms.ModelForm):
@@ -26,7 +27,24 @@ class RobotForm(BootstrapFormMixin, forms.ModelForm):
         self.fields["credencial"].empty_label = "Sin login SAP"
 
 
-class ProgramacionForm(BootstrapFormMixin, forms.ModelForm):
+def robots_instalados():
+    return Robot.objects.filter(codigo__in=list(registro.todos()))
+
+
+def atributos_parametros(url, destino):
+    """Atributos HTMX para recargar los parámetros al cambiar de robot."""
+    return {
+        "hx-get": url, "hx-target": destino, "hx-trigger": "change",
+        "hx-include": "this",
+    }
+
+
+CAMPOS_HORARIO = ["nombre", "frecuencia", "hora", "dias_semana", "dia_mes", "activa"]
+
+
+class HorarioFormMixin(BootstrapFormMixin, forms.ModelForm):
+    """Frecuencia y hora comunes a las programaciones de robots y orquestadores."""
+
     dias_semana = forms.MultipleChoiceField(
         label="Días de la semana",
         choices=Programacion.DIAS_SEMANA,
@@ -34,11 +52,6 @@ class ProgramacionForm(BootstrapFormMixin, forms.ModelForm):
         widget=forms.CheckboxSelectMultiple,
         help_text="Solo para frecuencia semanal.",
     )
-
-    class Meta:
-        model = Programacion
-        fields = ["robot", "nombre", "frecuencia", "hora", "dias_semana", "dia_mes", "activa"]
-        widgets = {"hora": forms.TimeInput(attrs={"type": "time"}, format="%H:%M")}
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -58,6 +71,73 @@ class ProgramacionForm(BootstrapFormMixin, forms.ModelForm):
             if not dia or not 1 <= dia <= 31:
                 self.add_error("dia_mes", "Indique un día entre 1 y 31.")
         return datos
+
+
+class ProgramacionForm(HorarioFormMixin):
+    """Programación de un robot suelto, con sus parámetros de ejecución."""
+
+    class Meta:
+        model = Programacion
+        fields = ["robot", *CAMPOS_HORARIO]
+        widgets = {"hora": forms.TimeInput(attrs={"type": "time"}, format="%H:%M")}
+
+    def __init__(self, *args, url_parametros=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["robot"].queryset = robots_instalados()
+        self.fields["robot"].required = True
+        if url_parametros:
+            self.fields["robot"].widget.attrs.update(
+                atributos_parametros(url_parametros, "#parametros-robot")
+            )
+
+    def save(self, commit=True):
+        self.instance.orquestador = None
+        return super().save(commit)
+
+
+class ProgramacionOrquestadorForm(HorarioFormMixin):
+    """Programación de un orquestador: a la hora indicada arranca la cadena y
+    sus robots corren en el orden de sus pasos, con los parámetros de cada paso."""
+
+    class Meta:
+        model = Programacion
+        fields = ["orquestador", *CAMPOS_HORARIO]
+        widgets = {"hora": forms.TimeInput(attrs={"type": "time"}, format="%H:%M")}
+
+    def __init__(self, *args, url_pasos=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["orquestador"].queryset = Orquestador.objects.all()
+        self.fields["orquestador"].required = True
+        if url_pasos:
+            self.fields["orquestador"].widget.attrs.update(
+                atributos_parametros(url_pasos, "#pasos-orquestador")
+            )
+
+    def save(self, commit=True):
+        self.instance.robot = None
+        self.instance.parametros = {}
+        return super().save(commit)
+
+
+class OrquestadorForm(BootstrapFormMixin, forms.ModelForm):
+    class Meta:
+        model = Orquestador
+        fields = ["nombre", "descripcion", "activo"]
+        widgets = {"descripcion": forms.Textarea(attrs={"rows": 2})}
+
+
+class PasoForm(BootstrapFormMixin, forms.ModelForm):
+    class Meta:
+        model = PasoOrquestador
+        fields = ["robot"]
+
+    def __init__(self, *args, url_parametros=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["robot"].queryset = robots_instalados()
+        if url_parametros:  # PasoForm
+            self.fields["robot"].widget.attrs.update(
+                atributos_parametros(url_parametros, "#parametros-robot")
+            )
 
 
 class FiltroEjecucionesForm(BootstrapFormMixin, forms.Form):

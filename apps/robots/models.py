@@ -85,7 +85,18 @@ class Programacion(models.Model):
         ("4", "Viernes"), ("5", "Sábado"), ("6", "Domingo"),
     ]
 
-    robot = models.ForeignKey(Robot, on_delete=models.CASCADE, related_name="programaciones")
+    robot = models.ForeignKey(
+        Robot, on_delete=models.CASCADE, related_name="programaciones", null=True, blank=True,
+    )
+    orquestador = models.ForeignKey(
+        "Orquestador", on_delete=models.CASCADE, related_name="programaciones",
+        null=True, blank=True,
+        help_text="Programar un orquestador en vez de un robot.",
+    )
+    parametros = models.JSONField(
+        default=dict, blank=True,
+        help_text="Parámetros de ejecución del robot (p. ej. periodo y nombre del archivo).",
+    )
     nombre = models.CharField(max_length=120)
     frecuencia = models.CharField(max_length=10, choices=Frecuencia.choices)
     hora = models.TimeField()
@@ -111,7 +122,18 @@ class Programacion(models.Model):
         ordering = ["robot__nombre", "hora"]
 
     def __str__(self):
-        return f"{self.nombre} ({self.robot})"
+        return f"{self.nombre} ({self.destino})"
+
+    @property
+    def destino(self):
+        """Robot u orquestador que se ejecuta."""
+        return self.orquestador or self.robot
+
+    def parametros_legibles(self):
+        """[(etiqueta, valor)] de los parámetros guardados, para mostrar."""
+        if not self.robot or not self.robot.instalado:
+            return []
+        return parametros.legibles(self.robot.clase.parametros_ejecucion, self.parametros)
 
     @property
     def dias_semana_lista(self):
@@ -132,6 +154,133 @@ class Programacion(models.Model):
 
         self.proxima_ejecucion = calcular_proxima(self, timezone.now()) if self.activa else None
         super().save(*args, **kwargs)
+
+
+class Orquestador(models.Model):
+    """Cadena de robots que se ejecutan uno tras otro.
+
+    Cada paso arranca solo si el anterior terminó EXITOSO; ante cualquier
+    otro resultado (fallida, sin datos, cancelada) la cadena se detiene.
+    """
+
+    nombre = models.CharField(max_length=120, unique=True)
+    descripcion = models.TextField("descripción", blank=True)
+    activo = models.BooleanField(default=True)
+    creado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        editable=False,
+    )
+    actualizado = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "orquestador"
+        verbose_name_plural = "orquestadores"
+        ordering = ["nombre"]
+
+    def __str__(self):
+        return self.nombre
+
+    @property
+    def ultima_ejecucion(self):
+        return self.ejecuciones.first()
+
+    def problemas(self):
+        """Motivos por los que no se puede ejecutar (lista vacía = listo)."""
+        pasos = list(self.pasos.select_related("robot__credencial"))
+        if not pasos:
+            return ["No tiene pasos."]
+        errores = []
+        for paso in pasos:
+            robot = paso.robot
+            if not robot.instalado:
+                errores.append(f"Paso {paso.orden}: el robot {robot} no está instalado.")
+            elif not robot.activo:
+                errores.append(f"Paso {paso.orden}: el robot {robot} está inactivo.")
+            elif robot.requiere_sap and robot.credencial is None:
+                errores.append(f"Paso {paso.orden}: el robot {robot} no tiene login SAP.")
+        return errores
+
+
+class PasoOrquestador(models.Model):
+    orquestador = models.ForeignKey(Orquestador, on_delete=models.CASCADE, related_name="pasos")
+    orden = models.PositiveSmallIntegerField()
+    robot = models.ForeignKey(Robot, on_delete=models.PROTECT, related_name="pasos_orquestador")
+    parametros = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        verbose_name = "paso de orquestador"
+        verbose_name_plural = "pasos de orquestador"
+        ordering = ["orquestador", "orden"]
+
+    def __str__(self):
+        return f"{self.orquestador} · {self.orden}. {self.robot}"
+
+    def parametros_legibles(self):
+        if not self.robot.instalado:
+            return []
+        return parametros.legibles(self.robot.clase.parametros_ejecucion, self.parametros)
+
+    @property
+    def siguiente(self):
+        return self.orquestador.pasos.filter(orden__gt=self.orden).first()
+
+
+class EjecucionOrquestador(models.Model):
+    """Una corrida de un orquestador: agrupa las ejecuciones de sus pasos."""
+
+    class Estado(models.TextChoices):
+        EJECUTANDO = "EJECUTANDO", "Ejecutando"
+        EXITOSA = "EXITOSA", "Exitosa"
+        DETENIDA = "DETENIDA", "Detenida"
+        CANCELADA = "CANCELADA", "Cancelada"
+
+    COLORES = {
+        Estado.EJECUTANDO: "primary",
+        Estado.EXITOSA: "success",
+        Estado.DETENIDA: "danger",
+        Estado.CANCELADA: "warning",
+    }
+
+    orquestador = models.ForeignKey(
+        Orquestador, on_delete=models.CASCADE, related_name="ejecuciones"
+    )
+    estado = models.CharField(max_length=12, choices=Estado.choices, default=Estado.EJECUTANDO)
+    origen = models.CharField(max_length=12, default="MANUAL")
+    programacion = models.ForeignKey(
+        Programacion, on_delete=models.SET_NULL, null=True, blank=True
+    )
+    solicitada_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True
+    )
+    creada = models.DateTimeField(auto_now_add=True)
+    fin = models.DateTimeField(null=True, blank=True)
+    mensaje = models.TextField(blank=True)
+
+    class Meta:
+        verbose_name = "ejecución de orquestador"
+        verbose_name_plural = "ejecuciones de orquestador"
+        ordering = ["-creada"]
+
+    def __str__(self):
+        return f"Cadena #{self.pk} {self.orquestador} ({self.get_estado_display()})"
+
+    @property
+    def color(self):
+        return self.COLORES.get(self.estado, "secondary")
+
+    @property
+    def activa(self):
+        return self.estado == self.Estado.EJECUTANDO
+
+    @property
+    def duracion(self):
+        return (self.fin or timezone.now()) - self.creada
+
+    def get_origen_display(self):
+        return Ejecucion.Origen(self.origen).label
+
+    def puede_cancelar(self, usuario):
+        return self.activa and (usuario.es_admin or self.solicitada_por_id == usuario.pk)
 
 
 class Ejecucion(models.Model):
@@ -165,6 +314,14 @@ class Ejecucion(models.Model):
     )
     solicitada_por = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True
+    )
+    # Si pertenece a la corrida de un orquestador
+    cadena = models.ForeignKey(
+        EjecucionOrquestador, on_delete=models.CASCADE, null=True, blank=True,
+        related_name="pasos",
+    )
+    paso = models.ForeignKey(
+        PasoOrquestador, on_delete=models.SET_NULL, null=True, blank=True
     )
     parametros = models.JSONField(default=dict, blank=True)
     creada = models.DateTimeField(auto_now_add=True)

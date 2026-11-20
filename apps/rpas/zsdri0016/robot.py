@@ -19,6 +19,13 @@ CAMPO_TIPO_MATERIAL = "wnd[0]/usr/ctxtS_MTART-LOW"
 BOTON_VARIANTES = "wnd[0]/tbar[1]/btn[33]"
 MENU_EXPORTAR = "wnd[0]/mbar/menu[0]/menu[3]/menu[1]"
 
+MES_ANTERIOR = "MES_ANTERIOR"
+MES_EN_CURSO = "MES_EN_CURSO"
+PERIODOS = (
+    (MES_ANTERIOR, "Mes anterior completo"),
+    (MES_EN_CURSO, "Mes en curso (del día 1 a hoy)"),
+)
+
 
 @registrar
 class RobotZSDRI0016(RobotSAP):
@@ -52,10 +59,17 @@ class RobotZSDRI0016(RobotSAP):
     )
 
     parametros_ejecucion = (
+        Parametro("periodo", "Periodo", Tipo.OPCION, defecto=MES_ANTERIOR, requerido=True,
+                  opciones=PERIODOS,
+                  ayuda="Para programaciones: 'Mes en curso' descarga del día 1 hasta hoy."),
         Parametro("fecha_desde", "Fecha desde", Tipo.FECHA,
-                  ayuda="Vacío = primer día del mes anterior."),
+                  ayuda="Opcional: si se indica, reemplaza el inicio del periodo."),
         Parametro("fecha_hasta", "Fecha hasta", Tipo.FECHA,
-                  ayuda="Vacío = último día del mes anterior."),
+                  ayuda="Opcional: si se indica, reemplaza el fin del periodo."),
+        Parametro("nombre_archivo", "Nombre fijo del archivo",
+                  ayuda="Sin extensión, p. ej. Ventas_Mes_Actual. Cada ejecución reemplaza "
+                        "el archivo, así el origen de datos en Excel no cambia. Vacío = "
+                        "prefijo + periodo."),
     )
 
     def carpetas_autorizadas(self, config):
@@ -87,7 +101,7 @@ class RobotZSDRI0016(RobotSAP):
         ))
 
         ctx.paso("Abrir exportación", lambda: sesion.seleccionar_menu(MENU_EXPORTAR))
-        nombre = f"{config['nombre_reporte']}_{fechas.sufijo_periodo(desde, hasta)}"
+        nombre = self._nombre_archivo(config, ctx.parametros, desde, hasta)
         destino = alv.exportar_excel(
             sesion, ctx.log, config["carpeta_exportacion"], nombre, ctx.paso,
             tiempo_verificacion=sesion.tiempo_espera,
@@ -99,13 +113,26 @@ class RobotZSDRI0016(RobotSAP):
         return Resultado(mensaje=f"Reporte exportado en {destino}", archivo=str(destino))
 
     @staticmethod
-    def _periodo(parametros):
-        defecto_desde, defecto_hasta = fechas.mes_anterior()
+    def _periodo(parametros, hoy=None):
+        if parametros.get("periodo") == MES_EN_CURSO:
+            defecto_desde, defecto_hasta = fechas.mes_en_curso(hoy)
+        else:
+            defecto_desde, defecto_hasta = fechas.mes_anterior(hoy)
         desde = parametros.get("fecha_desde") or defecto_desde
         hasta = parametros.get("fecha_hasta") or defecto_hasta
         if desde > hasta:
             raise ErrorFatal("La fecha desde no puede ser posterior a la fecha hasta")
         return desde, hasta
+
+    @staticmethod
+    def _nombre_archivo(config, parametros, desde, hasta):
+        fijo = (parametros.get("nombre_archivo") or "").strip()
+        if fijo:
+            fijo = fijo.removesuffix(".xlsx").removesuffix(".XLSX")
+            if any(c in fijo for c in '\\/:*?"<>|'):
+                raise ErrorFatal(f"El nombre de archivo '{fijo}' tiene caracteres no válidos")
+            return fijo
+        return f"{config['nombre_reporte']}_{fechas.sufijo_periodo(desde, hasta)}"
 
     def _abrir_reporte(self, ctx):
         config = ctx.config

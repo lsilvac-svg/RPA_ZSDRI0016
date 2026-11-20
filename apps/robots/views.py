@@ -12,9 +12,16 @@ from django.views.generic import (
 
 from apps.cuentas.permisos import AdminRequeridoMixin
 
+from . import orquestacion
 from . import parametros as params
-from .forms import FiltroEjecucionesForm, ProgramacionForm, RobotForm
-from .models import Ejecucion, EstadoWorker, Programacion, Robot, sincronizar_robots
+from .forms import (
+    FiltroEjecucionesForm, OrquestadorForm, PasoForm, ProgramacionForm,
+    ProgramacionOrquestadorForm, RobotForm,
+)
+from .models import (
+    EjecucionOrquestador, Ejecucion, EstadoWorker, Orquestador, PasoOrquestador,
+    Programacion, Robot, sincronizar_robots,
+)
 
 PREFIJO_EJECUCION = "ej"
 PREFIJO_CONFIG = "cfg"
@@ -69,6 +76,10 @@ class RobotEjecutarView(View):
             return redirect("robots:detalle", pk=pk)
         if robot.requiere_sap and robot.credencial is None:
             messages.error(request, "El robot no tiene un login SAP asignado.")
+            return redirect("robots:detalle", pk=pk)
+        motivo = orquestacion.robot_ocupado(robot)
+        if motivo:
+            messages.error(request, f"No se encoló: {motivo}.")
             return redirect("robots:detalle", pk=pk)
 
         definicion = robot.clase.parametros_ejecucion
@@ -153,7 +164,9 @@ class EjecucionDetailView(DetailView):
     context_object_name = "ejecucion"
 
     def get_queryset(self):
-        return Ejecucion.objects.select_related("robot", "solicitada_por", "programacion")
+        return Ejecucion.objects.select_related(
+            "robot", "solicitada_por", "programacion", "cadena__orquestador", "paso"
+        )
 
     def get_template_names(self):
         # Con HTMX se refresca solo el bloque de estado y logs
@@ -167,11 +180,9 @@ class EjecucionDetailView(DetailView):
         contexto["logs"] = ejecucion.logs.all()
         contexto["puede_cancelar"] = ejecucion.puede_cancelar(self.request.user)
         if ejecucion.robot.instalado:
-            definicion = ejecucion.robot.clase.parametros_ejecucion
-            contexto["parametros"] = [
-                (p.etiqueta, ejecucion.parametros.get(p.nombre) or "Por defecto")
-                for p in definicion
-            ]
+            contexto["parametros"] = params.legibles(
+                ejecucion.robot.clase.parametros_ejecucion, ejecucion.parametros
+            )
         return contexto
 
 
@@ -187,6 +198,8 @@ class EjecucionCancelarView(View):
                 fin=timezone.now(),
                 mensaje=f"Cancelada por {request.user}",
             )
+            ejecucion.refresh_from_db()
+            orquestacion.avanzar(ejecucion)  # detiene su cadena, si tiene
             messages.success(request, "Ejecución cancelada.")
         else:
             Ejecucion.objects.filter(pk=pk).update(cancelacion_solicitada=True)
@@ -199,6 +212,10 @@ class EjecucionReintentarView(View):
         original = get_object_or_404(Ejecucion, pk=pk)
         if not original.puede_reintentar:
             messages.error(request, "Solo se pueden reintentar ejecuciones fallidas o canceladas.")
+            return redirect("robots:ejecucion", pk=pk)
+        motivo = orquestacion.robot_ocupado(original.robot)
+        if motivo:
+            messages.error(request, f"No se encoló: {motivo}.")
             return redirect("robots:ejecucion", pk=pk)
 
         nueva = Ejecucion.objects.create(
@@ -284,36 +301,175 @@ class WorkerCambiarView(AdminRequeridoMixin, View):
 LISTA_PROGRAMACIONES = reverse_lazy("robots:programaciones")
 
 
+def formulario_parametros_robot(robot, data=None, valores=None):
+    """Formulario de los parámetros de ejecución de un robot (o None si no tiene)."""
+    if robot is None or not robot.instalado or not robot.clase.parametros_ejecucion:
+        return None
+    return params.construir_formulario(
+        robot.clase.parametros_ejecucion, data=data, valores=valores, prefix=PREFIJO_EJECUCION
+    )
+
+
+def robot_elegido(valor):
+    if not valor:
+        return None
+    return Robot.objects.filter(pk=valor).first() if str(valor).isdigit() else None
+
+
+class ParametrosRobotView(AdminRequeridoMixin, View):
+    """Fragmento HTMX: parámetros de ejecución del robot elegido en un formulario."""
+
+    def get(self, request):
+        robot = robot_elegido(request.GET.get("robot"))
+        return render(request, "robots/_parametros_robot.html", {
+            "form_parametros": formulario_parametros_robot(robot), "robot": robot,
+        })
+
+
+class FormularioConParametrosMixin:
+    """Formulario principal (con campo robot) + parámetros de ejecución del robot.
+
+    Las subclases definen form_class, titulo, volver y guardar().
+    """
+
+    template_name = "robots/formulario_con_parametros.html"
+    titulo = ""
+    instancia = None
+
+    def get_volver(self):
+        return self.volver
+
+    def _formularios(self, data=None, inicial=None):
+        form = self.form_class(
+            data=data, instance=self.instancia, initial=inicial,
+            url_parametros=reverse("robots:parametros_robot"),
+        )
+        if data is not None:
+            robot = robot_elegido(data.get("robot"))
+        else:
+            robot = robot_elegido((inicial or {}).get("robot")) or getattr(
+                self.instancia, "robot", None
+            )
+        mismo_robot = self.instancia is not None and getattr(self.instancia, "robot_id", None) == (
+            robot.pk if robot else None
+        )
+        valores = self.instancia.parametros if mismo_robot else None
+        return form, formulario_parametros_robot(robot, data=data, valores=valores), robot
+
+    def _render(self, form, form_parametros, robot):
+        return render(self.request, self.template_name, {
+            "titulo": self.titulo, "volver": self.get_volver(), "form": form,
+            "form_parametros": form_parametros, "robot": robot,
+        })
+
+    def get(self, request, *args, **kwargs):
+        return self._render(*self._formularios(inicial=self.get_initial()))
+
+    def post(self, request, *args, **kwargs):
+        form, form_parametros, robot = self._formularios(data=request.POST)
+        if form.is_valid() and (form_parametros is None or form_parametros.is_valid()):
+            valores = {}
+            if form_parametros is not None:
+                valores = params.serializar(robot.clase.parametros_ejecucion,
+                                            form_parametros.cleaned_data)
+            form.instance.parametros = valores
+            return self.guardar(form)
+        return self._render(form, form_parametros, robot)
+
+    def get_initial(self):
+        return {}
+
+
 class ProgramacionListView(AdminRequeridoMixin, ListView):
     template_name = "robots/programacion_lista.html"
     context_object_name = "programaciones"
 
     def get_queryset(self):
-        return Programacion.objects.select_related("robot")
+        return Programacion.objects.select_related("robot", "orquestador").prefetch_related(
+            "orquestador__pasos__robot"
+        )
 
 
-class ProgramacionCrearView(AdminRequeridoMixin, CreateView):
-    model = Programacion
+class ProgramacionCrearView(AdminRequeridoMixin, FormularioConParametrosMixin, View):
     form_class = ProgramacionForm
-    template_name = "core/formulario.html"
-    success_url = LISTA_PROGRAMACIONES
-    extra_context = {"titulo": "Nueva programación", "volver": LISTA_PROGRAMACIONES}
+    titulo = "Nueva programación"
+    volver = LISTA_PROGRAMACIONES
+
+    titulo = "Programar robot"
 
     def get_initial(self):
         return {"robot": self.request.GET.get("robot")}
 
+    def guardar(self, form):
+        form.instance.creada_por = self.request.user
+        form.save()
+        messages.success(self.request, "Programación creada.")
+        return redirect(LISTA_PROGRAMACIONES)
+
+
+class ProgramacionEditarView(AdminRequeridoMixin, FormularioConParametrosMixin, View):
+    form_class = ProgramacionForm
+    titulo = "Editar programación de robot"
+    volver = LISTA_PROGRAMACIONES
+
+    def dispatch(self, request, *args, pk=None, **kwargs):
+        self.instancia = get_object_or_404(Programacion, pk=pk)
+        if self.instancia.orquestador_id:
+            return redirect("robots:programacion_orquestador_editar", pk=pk)
+        return super().dispatch(request, *args, **kwargs)
+
+    def guardar(self, form):
+        form.save()
+        messages.success(self.request, "Programación actualizada.")
+        return redirect(LISTA_PROGRAMACIONES)
+
+
+class PasosOrquestadorView(AdminRequeridoMixin, View):
+    """Fragmento HTMX: robots que ejecutará el orquestador elegido, en orden."""
+
+    def get(self, request):
+        valor = request.GET.get("orquestador", "")
+        orquestador = Orquestador.objects.filter(pk=valor).first() if valor.isdigit() else None
+        return render(request, "robots/_pasos_orquestador.html", {"orquestador": orquestador})
+
+
+class ProgramacionOrquestadorMixin(AdminRequeridoMixin):
+    model = Programacion
+    form_class = ProgramacionOrquestadorForm
+    template_name = "robots/programacion_orquestador.html"
+    success_url = LISTA_PROGRAMACIONES
+
+    def get_form_kwargs(self):
+        return {**super().get_form_kwargs(), "url_pasos": reverse("robots:pasos_orquestador")}
+
+    def get_context_data(self, **kwargs):
+        contexto = super().get_context_data(**kwargs)
+        form = contexto["form"]
+        valor = form["orquestador"].value()
+        contexto["orquestador"] = (
+            Orquestador.objects.filter(pk=valor).first() if str(valor or "").isdigit() else None
+        )
+        contexto["volver"] = LISTA_PROGRAMACIONES
+        return contexto
+
+
+class ProgramacionOrquestadorCrearView(ProgramacionOrquestadorMixin, CreateView):
+    extra_context = {"titulo": "Programar orquestador"}
+
+    def get_initial(self):
+        return {"orquestador": self.request.GET.get("orquestador")}
+
     def form_valid(self, form):
         form.instance.creada_por = self.request.user
-        messages.success(self.request, "Programación creada.")
+        messages.success(self.request, "Programación del orquestador creada.")
         return super().form_valid(form)
 
 
-class ProgramacionEditarView(AdminRequeridoMixin, UpdateView):
-    model = Programacion
-    form_class = ProgramacionForm
-    template_name = "core/formulario.html"
-    success_url = LISTA_PROGRAMACIONES
-    extra_context = {"titulo": "Editar programación", "volver": LISTA_PROGRAMACIONES}
+class ProgramacionOrquestadorEditarView(ProgramacionOrquestadorMixin, UpdateView):
+    extra_context = {"titulo": "Editar programación de orquestador"}
+
+    def get_queryset(self):
+        return Programacion.objects.filter(orquestador__isnull=False)
 
     def form_valid(self, form):
         messages.success(self.request, "Programación actualizada.")
@@ -339,3 +495,201 @@ class ProgramacionAlternarView(AdminRequeridoMixin, View):
         estado = "activada" if programacion.activa else "pausada"
         messages.success(request, f"Programación {estado}.")
         return redirect(request.POST.get("volver") or reverse("robots:programaciones"))
+
+
+# ==============================================
+# ORQUESTADORES
+# ==============================================
+
+LISTA_ORQUESTADORES = reverse_lazy("robots:orquestadores")
+
+
+class OrquestadorListView(ListView):
+    template_name = "robots/orquestador_lista.html"
+    context_object_name = "orquestadores"
+
+    def get_queryset(self):
+        return Orquestador.objects.prefetch_related("pasos__robot")
+
+
+class OrquestadorDetailView(DetailView):
+    model = Orquestador
+    template_name = "robots/orquestador_detalle.html"
+    context_object_name = "orquestador"
+
+    def get_context_data(self, **kwargs):
+        contexto = super().get_context_data(**kwargs)
+        orquestador = self.object
+        contexto["pasos"] = orquestador.pasos.select_related("robot__credencial")
+        contexto["problemas"] = orquestador.problemas()
+        contexto["cadenas"] = orquestador.ejecuciones.select_related("solicitada_por")[:10]
+        contexto["programaciones"] = orquestador.programaciones.all()
+        return contexto
+
+
+class OrquestadorCrearView(AdminRequeridoMixin, CreateView):
+    model = Orquestador
+    form_class = OrquestadorForm
+    template_name = "core/formulario.html"
+    extra_context = {"titulo": "Nuevo orquestador", "volver": LISTA_ORQUESTADORES}
+
+    def form_valid(self, form):
+        form.instance.creado_por = self.request.user
+        messages.success(self.request, "Orquestador creado. Ahora agregue sus pasos.")
+        return super().form_valid(form)
+
+    def get_success_url(self):
+        return reverse("robots:orquestador", args=[self.object.pk])
+
+
+class OrquestadorEditarView(AdminRequeridoMixin, UpdateView):
+    model = Orquestador
+    form_class = OrquestadorForm
+    template_name = "core/formulario.html"
+    extra_context = {"titulo": "Editar orquestador"}
+
+    def get_context_data(self, **kwargs):
+        contexto = super().get_context_data(**kwargs)
+        contexto["volver"] = reverse("robots:orquestador", args=[self.object.pk])
+        return contexto
+
+    def form_valid(self, form):
+        messages.success(self.request, "Orquestador actualizado.")
+        return super().form_valid(form)
+
+    def get_success_url(self):
+        return reverse("robots:orquestador", args=[self.object.pk])
+
+
+class OrquestadorEliminarView(AdminRequeridoMixin, DeleteView):
+    model = Orquestador
+    template_name = "core/confirmar_eliminar.html"
+    success_url = LISTA_ORQUESTADORES
+    extra_context = {"volver": LISTA_ORQUESTADORES}
+
+    def form_valid(self, form):
+        messages.success(self.request, "Orquestador eliminado.")
+        return super().form_valid(form)
+
+
+class OrquestadorEjecutarView(View):
+    """Inicia la cadena (perfil Usuario y Administrador)."""
+
+    def post(self, request, pk):
+        orquestador = get_object_or_404(Orquestador, pk=pk)
+        try:
+            cadena = orquestacion.iniciar(orquestador, usuario=request.user)
+        except orquestacion.OrquestadorNoDisponible as motivo:
+            messages.error(request, str(motivo))
+            return redirect("robots:orquestador", pk=pk)
+
+        messages.success(request, f"Cadena #{cadena.pk} iniciada: se encoló el primer paso.")
+        worker = EstadoWorker.obtener()
+        if not worker.activo:
+            messages.warning(
+                request,
+                f"El worker está {worker.get_estado_display().lower()}: la cadena "
+                "quedará en cola hasta que se active (ver Monitor).",
+            )
+        return redirect("robots:cadena", pk=cadena.pk)
+
+
+class PasoMixin(AdminRequeridoMixin, FormularioConParametrosMixin):
+    form_class = PasoForm
+
+    def get_volver(self):
+        return reverse("robots:orquestador", args=[self.orquestador.pk])
+
+    def guardar(self, form):
+        paso = form.save(commit=False)
+        paso.orquestador = self.orquestador
+        if paso.orden is None:
+            ultimo = self.orquestador.pasos.order_by("-orden").first()
+            paso.orden = (ultimo.orden + 1) if ultimo else 1
+        paso.save()
+        messages.success(self.request, f"Paso {paso.orden} guardado.")
+        return redirect(self.get_volver())
+
+
+class PasoCrearView(PasoMixin, View):
+    titulo = "Agregar paso"
+
+    def dispatch(self, request, *args, pk=None, **kwargs):
+        self.orquestador = get_object_or_404(Orquestador, pk=pk)
+        return super().dispatch(request, *args, **kwargs)
+
+
+class PasoEditarView(PasoMixin, View):
+    titulo = "Editar paso"
+
+    def dispatch(self, request, *args, pk=None, **kwargs):
+        self.instancia = get_object_or_404(PasoOrquestador, pk=pk)
+        self.orquestador = self.instancia.orquestador
+        return super().dispatch(request, *args, **kwargs)
+
+
+class PasoEliminarView(AdminRequeridoMixin, View):
+    def post(self, request, pk):
+        paso = get_object_or_404(PasoOrquestador, pk=pk)
+        orquestador = paso.orquestador
+        paso.delete()
+        _renumerar(orquestador)
+        messages.success(request, "Paso eliminado.")
+        return redirect("robots:orquestador", pk=orquestador.pk)
+
+
+class PasoMoverView(AdminRequeridoMixin, View):
+    def post(self, request, pk):
+        paso = get_object_or_404(PasoOrquestador, pk=pk)
+        pasos = list(paso.orquestador.pasos.all())
+        i = pasos.index(paso)
+        j = i - 1 if request.POST.get("direccion") == "subir" else i + 1
+        if 0 <= j < len(pasos):
+            pasos[i], pasos[j] = pasos[j], pasos[i]
+            _renumerar(paso.orquestador, pasos)
+        return redirect("robots:orquestador", pk=paso.orquestador.pk)
+
+
+def _renumerar(orquestador, pasos=None):
+    pasos = pasos if pasos is not None else list(orquestador.pasos.all())
+    for orden, paso in enumerate(pasos, start=1):
+        if paso.orden != orden:
+            PasoOrquestador.objects.filter(pk=paso.pk).update(orden=orden)
+
+
+class CadenaDetailView(DetailView):
+    model = EjecucionOrquestador
+    context_object_name = "cadena"
+
+    def get_queryset(self):
+        return EjecucionOrquestador.objects.select_related(
+            "orquestador", "solicitada_por", "programacion"
+        )
+
+    def get_template_names(self):
+        if self.request.headers.get("HX-Request"):
+            return ["robots/_cadena_estado.html"]
+        return ["robots/cadena_detalle.html"]
+
+    def get_context_data(self, **kwargs):
+        contexto = super().get_context_data(**kwargs)
+        cadena = self.object
+        ejecuciones = {e.paso_id: e for e in cadena.pasos.select_related("robot")}
+        # Todos los pasos del orquestador, con su ejecución si ya se encoló
+        filas = [(paso, ejecuciones.pop(paso.pk, None))
+                 for paso in cadena.orquestador.pasos.select_related("robot")]
+        # Ejecuciones de pasos que ya no existen en el orquestador
+        filas += [(None, e) for e in ejecuciones.values()]
+        contexto["filas"] = filas
+        contexto["puede_cancelar"] = cadena.puede_cancelar(self.request.user)
+        return contexto
+
+
+class CadenaCancelarView(View):
+    def post(self, request, pk):
+        cadena = get_object_or_404(EjecucionOrquestador, pk=pk)
+        if not cadena.puede_cancelar(request.user):
+            raise PermissionDenied("No puede cancelar esta cadena.")
+        orquestacion.cancelar(cadena, request.user)
+        messages.info(request, "Cadena cancelada: no se ejecutarán más pasos.")
+        return redirect("robots:cadena", pk=pk)

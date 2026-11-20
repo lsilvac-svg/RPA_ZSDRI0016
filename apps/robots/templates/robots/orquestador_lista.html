@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block titulo %}Orquestadores{% endblock %}
+{% block contenido %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <div>
+    <h1 class="h3 mb-0">Orquestadores</h1>
+    <div class="text-muted small">Cadenas de robots: cada paso se ejecuta si el anterior terminó exitoso o sin datos; si falla, la cadena se detiene.</div>
+  </div>
+  {% if user.es_admin %}
+  <a href="{% url 'robots:orquestador_crear' %}" class="btn btn-primary"><i class="bi bi-plus-lg"></i> Nuevo orquestador</a>
+  {% endif %}
+</div>
+<div class="row g-3">
+  {% for o in orquestadores %}
+  <div class="col-lg-6">
+    <div class="card shadow-sm h-100">
+      <div class="card-header bg-white d-flex justify-content-between align-items-center">
+        <a href="{% url 'robots:orquestador' o.pk %}" class="fw-semibold text-decoration-none"><i class="bi bi-diagram-3"></i> {{ o.nombre }}</a>
+        {% if o.activo %}<span class="badge text-bg-success">Activo</span>{% else %}<span class="badge text-bg-secondary">Inactivo</span>{% endif %}
+      </div>
+      <div class="card-body">
+        {% if o.descripcion %}<p class="small text-muted">{{ o.descripcion }}</p>{% endif %}
+        <ol class="mb-0 small">
+          {% for paso in o.pasos.all %}<li>{{ paso.robot }}</li>{% empty %}<li class="text-muted list-unstyled">Sin pasos.</li>{% endfor %}
+        </ol>
+      </div>
+      <div class="card-footer bg-white small text-muted">
+        {% with ultima=o.ultima_ejecucion %}
+        Última cadena:
+        {% if ultima %}<a href="{% url 'robots:cadena' ultima.pk %}">#{{ ultima.pk }}</a> <span class="badge text-bg-{{ ultima.color }}">{{ ultima.get_estado_display }}</span> {{ ultima.creada|date:"d/m/Y H:i" }}{% else %}—{% endif %}
+        {% endwith %}
+      </div>
+    </div>
+  </div>
+  {% empty %}
+  <div class="col-12"><div class="card shadow-sm"><div class="card-body text-center text-muted py-4">No hay orquestadores.</div></div></div>
+  {% endfor %}
+</div>
+{% endblock %}

@@ -8,8 +8,7 @@ from datetime import date
 from apps.robots.base import Resultado, RobotSAP
 from apps.robots.parametros import Parametro, Tipo
 from apps.robots.registro import registrar
-from apps.sap.motor import ErrorFatal, ErrorSAP, SinDatos
-from apps.sap.motor import alv, archivos, fechas
+from apps.sap.motor import ErrorFatal, ErrorSAP, SinDatos, alv, archivos, fechas
 from apps.sap.motor.windows import pywintypes
 
 # IDs de pantalla de la FBL1N (pantalla de selección RFITEMAP)
@@ -18,7 +17,6 @@ CAMPO_FECHA_CLAVE = "wnd[0]/usr/ctxtPA_STIDA"
 CAMPO_VARIANTE = "wnd[0]/usr/ctxtPA_VARI"
 CHECK_OPERACIONES_CME = "wnd[0]/usr/chkX_SHBV"
 CHECK_PARTIDAS_MEMO = "wnd[0]/usr/chkX_MERK"
-LISTA_VARIANTES = "wnd[1]/usr"
 MENU_EXPORTAR = "wnd[0]/mbar/menu[0]/menu[3]/menu[1]"
 COMBO_FORMATO = (
     "wnd[1]/usr/subSUB_CONFIGURATION:SAPLSALV_GUI_CUL_EXPORT_AS:0512/"
@@ -47,15 +45,9 @@ class RobotFbl1nAnticipos(RobotSAP):
                   Tipo.BOOLEANO, defecto=False,
                   ayuda="Desmarcado = un solo archivo que se reemplaza en cada ejecución."),
         Parametro("sociedad", "Sociedad", defecto="PE01", requerido=True),
-        Parametro("variante", "Variante de disposición",
-                  ayuda="Nombre de la variante, p. ej. /ANTICIPOS. Vacío = elegirla "
-                        "en la lista F4 por la posición de abajo (frágil)."),
-        Parametro("posicion_lista_variantes", "Posición de la barra en la lista F4",
-                  Tipo.ENTERO, defecto=14, minimo=0,
-                  ayuda="Solo si no se indica el nombre de la variante."),
-        Parametro("fila_lista_variantes", "Fila en la lista F4", Tipo.ENTERO,
-                  defecto=20, minimo=0,
-                  ayuda="Solo si no se indica el nombre de la variante."),
+        Parametro("variante", "Variante de disposición", defecto="/CXP EDWIN",
+                  requerido=True,
+                  ayuda="Nombre exacto de la variante en SAP, p. ej. /CXP EDWIN."),
         Parametro("tiempo_ejecucion_reporte", "Tiempo máximo del reporte (s)",
                   Tipo.ENTERO, defecto=600, minimo=30),
         Parametro("abrir_excel", "Permitir que SAP abra el Excel", Tipo.BOOLEANO, defecto=True),
@@ -87,7 +79,8 @@ class RobotFbl1nAnticipos(RobotSAP):
         ctx.paso("Ingresar sociedad", lambda: sesion.escribir(CAMPO_SOCIEDAD, config["sociedad"]))
         ctx.paso("Ingresar fecha clave",
                  lambda: sesion.escribir(CAMPO_FECHA_CLAVE, fechas.a_sap(fecha_clave)))
-        ctx.paso("Seleccionar variante de disposición", lambda: self._variante(ctx))
+        ctx.paso(f"Ingresar variante de disposición '{config['variante']}'",
+                 lambda: sesion.escribir(CAMPO_VARIANTE, config["variante"].strip()))
         ctx.paso("Ejecutar reporte",
                  lambda: self._ejecutar_reporte(ctx, config["tiempo_ejecucion_reporte"]))
 
@@ -117,38 +110,6 @@ class RobotFbl1nAnticipos(RobotSAP):
     def _marcar_opciones(sesion):
         sesion.elemento(CHECK_OPERACIONES_CME).selected = True
         sesion.elemento(CHECK_PARTIDAS_MEMO).selected = True
-
-    def _variante(self, ctx):
-        sesion, config = ctx.sesion, ctx.config
-        nombre = (config["variante"] or "").strip()
-        if nombre:
-            sesion.escribir(CAMPO_VARIANTE, nombre)
-            return
-
-        # Sin nombre: se repite la selección grabada en la lista F4
-        ctx.log.warning(
-            "No hay nombre de variante configurado; se elige por posición en la lista F4"
-        )
-        sesion.elemento(CAMPO_VARIANTE).setFocus()
-        sesion.tecla(4)
-        sesion.esperar()
-        lista = sesion.elemento(LISTA_VARIANTES)
-        lista.verticalScrollbar.position = config["posicion_lista_variantes"]
-        sesion.esperar()
-
-        etiqueta = sesion.com.findById(
-            f"{LISTA_VARIANTES}/lbl[1,{config['fila_lista_variantes']}]", False
-        )
-        if etiqueta is None:
-            sesion.tecla(12, "wnd[1]")
-            raise ErrorFatal(
-                "No se encontró la variante en la lista F4. Indicar su nombre en "
-                "Robots → Configurar"
-            )
-        ctx.log.info("Variante elegida en la lista: %s", etiqueta.Text.strip())
-        etiqueta.setFocus()
-        sesion.tecla(2, "wnd[1]")
-        sesion.esperar()
 
     def _ejecutar_reporte(self, ctx, tiempo_maximo):
         sesion = ctx.sesion

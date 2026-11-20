@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block titulo %}{{ orquestador.nombre }}{% endblock %}
+{% block contenido %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <div>
+    <h1 class="h3 mb-0"><i class="bi bi-diagram-3"></i> {{ orquestador.nombre }}</h1>
+    <div class="text-muted">{{ orquestador.descripcion|default:"Cadena de robots" }}</div>
+  </div>
+  <div class="text-nowrap">
+    <a href="{% url 'robots:orquestadores' %}" class="btn btn-outline-secondary"><i class="bi bi-arrow-left"></i> Orquestadores</a>
+    {% if user.es_admin %}
+    <a href="{% url 'robots:orquestador_editar' orquestador.pk %}" class="btn btn-outline-primary"><i class="bi bi-pencil"></i> Editar</a>
+    <a href="{% url 'robots:orquestador_eliminar' orquestador.pk %}" class="btn btn-outline-danger"><i class="bi bi-trash"></i></a>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card shadow-sm mb-4">
+  <div class="card-header bg-white d-flex justify-content-between align-items-center">
+    <span class="fw-semibold"><i class="bi bi-list-ol"></i> Pasos (en orden; continúa si el anterior fue exitoso o sin datos, se detiene si falla)</span>
+    {% if user.es_admin %}<a href="{% url 'robots:paso_crear' orquestador.pk %}" class="btn btn-sm btn-outline-primary"><i class="bi bi-plus-lg"></i> Agregar paso</a>{% endif %}
+  </div>
+  <div class="table-responsive">
+    <table class="table align-middle mb-0">
+      <thead class="table-light"><tr><th style="width:4rem">#</th><th>Robot</th><th>Parámetros</th><th></th></tr></thead>
+      <tbody>
+        {% for paso in pasos %}
+        <tr>
+          <td class="fw-semibold">{{ paso.orden }}</td>
+          <td><a href="{% url 'robots:detalle' paso.robot.pk %}">{{ paso.robot }}</a></td>
+          <td class="small">
+            {% for etiqueta, valor in paso.parametros_legibles %}<div><span class="text-muted">{{ etiqueta }}:</span> {{ valor }}</div>{% empty %}<span class="text-muted">—</span>{% endfor %}
+          </td>
+          <td class="text-end text-nowrap">
+            {% if user.es_admin %}
+            <form method="post" action="{% url 'robots:paso_mover' paso.pk %}" class="d-inline">
+              {% csrf_token %}
+              <button name="direccion" value="subir" class="btn btn-sm btn-outline-secondary" title="Subir" {% if forloop.first %}disabled{% endif %}><i class="bi bi-arrow-up"></i></button>
+              <button name="direccion" value="bajar" class="btn btn-sm btn-outline-secondary" title="Bajar" {% if forloop.last %}disabled{% endif %}><i class="bi bi-arrow-down"></i></button>
+            </form>
+            <a href="{% url 'robots:paso_editar' paso.pk %}" class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i></a>
+            <form method="post" action="{% url 'robots:paso_eliminar' paso.pk %}" class="d-inline" onsubmit="return confirm('¿Eliminar el paso {{ paso.orden }}?')">
+              {% csrf_token %}<button class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="4" class="text-center text-muted py-4">Sin pasos. Agregue los robots en el orden en que deben ejecutarse.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="card-footer bg-white">
+    {% if not orquestador.activo %}
+      <span class="text-muted">El orquestador está inactivo.</span>
+    {% elif problemas %}
+      <div class="text-warning small">{% for p in problemas %}<div><i class="bi bi-exclamation-triangle"></i> {{ p }}</div>{% endfor %}</div>
+    {% else %}
+    <form method="post" action="{% url 'robots:orquestador_ejecutar' orquestador.pk %}" class="d-inline">
+      {% csrf_token %}<button class="btn btn-success"><i class="bi bi-play-fill"></i> Ejecutar cadena</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card shadow-sm mb-4">
+  <div class="card-header bg-white d-flex justify-content-between align-items-center">
+    <span class="fw-semibold"><i class="bi bi-calendar-week"></i> Programaciones</span>
+    {% if user.es_admin %}<a href="{% url 'robots:programacion_orquestador_crear' %}?orquestador={{ orquestador.pk }}" class="btn btn-sm btn-outline-primary"><i class="bi bi-plus-lg"></i> Programar</a>{% endif %}
+  </div>
+  <ul class="list-group list-group-flush">
+    {% for p in programaciones %}
+    <li class="list-group-item d-flex justify-content-between">
+      <span>{{ p.nombre }} · <span class="text-muted">{{ p.descripcion_frecuencia }}</span></span>
+      <span>{% if p.activa %}Próxima: {{ p.proxima_ejecucion|date:"d/m/Y H:i" }}{% else %}<span class="badge text-bg-secondary">Pausada</span>{% endif %}</span>
+    </li>
+    {% empty %}
+    <li class="list-group-item text-muted">Sin programaciones.</li>
+    {% endfor %}
+  </ul>
+</div>
+
+<div class="card shadow-sm">
+  <div class="card-header bg-white fw-semibold">Últimas cadenas</div>
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0">
+      <thead class="table-light"><tr><th>#</th><th>Estado</th><th>Origen</th><th>Solicitada por</th><th>Creada</th><th>Resultado</th></tr></thead>
+      <tbody>
+        {% for c in cadenas %}
+        <tr>
+          <td><a href="{% url 'robots:cadena' c.pk %}">#{{ c.pk }}</a></td>
+          <td><span class="badge text-bg-{{ c.color }}">{{ c.get_estado_display }}</span></td>
+          <td>{{ c.get_origen_display }}</td>
+          <td>{{ c.solicitada_por|default:"Programador" }}</td>
+          <td>{{ c.creada|date:"d/m/Y H:i" }}</td>
+          <td class="small">{{ c.mensaje|truncatechars:90 }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="6" class="text-center text-muted py-4">Aún no se ha ejecutado.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

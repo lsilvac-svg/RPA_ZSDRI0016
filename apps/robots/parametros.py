@@ -17,6 +17,7 @@ class Tipo(str, Enum):
     BOOLEANO = "booleano"
     FECHA = "fecha"
     CARPETA = "carpeta"
+    OPCION = "opcion"
 
 
 @dataclass(frozen=True)
@@ -28,6 +29,14 @@ class Parametro:
     requerido: bool = False
     ayuda: str = ""
     minimo: int | None = None
+    # Solo Tipo.OPCION: ((valor, texto), ...)
+    opciones: tuple = ()
+
+    def texto(self, valor):
+        """Valor legible para mostrar en pantallas (p. ej. el texto de una opción)."""
+        if self.tipo == Tipo.OPCION:
+            return dict(self.opciones).get(valor, valor)
+        return valor
 
     def campo(self):
         comunes = {
@@ -45,6 +54,8 @@ class Parametro:
                     widget=forms.DateInput(attrs={"type": "date"}, format="%Y-%m-%d"),
                     **comunes,
                 )
+            case Tipo.OPCION:
+                return forms.ChoiceField(choices=self.opciones, **comunes)
             case _:
                 return forms.CharField(max_length=255, **comunes)
 
@@ -77,6 +88,17 @@ def construir_formulario(parametros, *, data=None, valores=None, prefix=None):
 
 def serializar(parametros, datos_limpios):
     return {p.nombre: p.a_json(datos_limpios.get(p.nombre)) for p in parametros}
+
+
+def legibles(parametros, guardados, vacio="Por defecto"):
+    """[(etiqueta, texto)] de los valores guardados, para mostrar en pantallas."""
+    filas = []
+    for p in parametros:
+        valor = (guardados or {}).get(p.nombre)
+        if valor in (None, ""):
+            valor = p.defecto
+        filas.append((p.etiqueta, vacio if valor in (None, "") else p.texto(valor)))
+    return filas
 
 
 def resolver(parametros, guardados):

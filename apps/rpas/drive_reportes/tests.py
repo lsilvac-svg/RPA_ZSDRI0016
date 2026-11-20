@@ -39,6 +39,7 @@ class RobotDriveReportesTests(TestCase):
         futuro = time.time() + 60
         os.utime(reciente, (futuro, futuro))
         crear_excel(self.reporte / "Anticipos_FBL1N_20261112.xlsx", [["Cuenta"], ["20000005"]])
+        crear_excel(self.reporte / "Archivo_FBL5N.xlsx", [["Cliente"], ["10000001"]])
 
         cuenta = CuentaGoogle(nombre="RPA")
         cuenta.clave = CLAVE
@@ -49,6 +50,7 @@ class RobotDriveReportesTests(TestCase):
             configuracion={
                 "carpeta_proveedores": str(self.proveedores),
                 "carpeta_reporte_sap": str(self.reporte),
+                "carpeta_fbl5n": str(self.reporte),
                 "hoja_proveedores": "https://docs.google.com/spreadsheets/d/HOJA1/edit",
                 "carpeta_drive_reporte": "https://drive.google.com/drive/folders/CARPETA1",
             },
@@ -72,7 +74,7 @@ class RobotDriveReportesTests(TestCase):
         self.assertIs(registro.obtener("DRIVE_REPORTES"), RobotDriveReportes)
         self.assertFalse(self.robot.requiere_sap)
 
-    def test_sube_ambos_sin_abrir_sap_ni_login(self):
+    def test_sube_todo_sin_abrir_sap_ni_login(self):
         ejecucion, cliente, conector = self._ejecutar()
         self.assertEqual(ejecucion.estado, Ejecucion.Estado.EXITOSA, ejecucion.mensaje)
         conector.assert_not_called()
@@ -83,18 +85,43 @@ class RobotDriveReportesTests(TestCase):
         self.assertEqual([f[2] for f in filas[1:]], ["ACME", "ACME"])
         self.assertIn("2 nuevos", ejecucion.mensaje)
 
-        # Reporte SAP: reemplazo con nombre fijo
-        carpeta, nombre, contenido = cliente.reemplazar_archivo.call_args.args
-        self.assertEqual((carpeta, nombre), ("CARPETA1", "Anticipos_FBL1N.xlsx"))
-        self.assertTrue(contenido.startswith(b"PK"))
+        # FBL1N y FBL5N: reemplazo con nombre fijo (FBL5N usa la carpeta de FBL1N por defecto)
+        subidos = {c.args[1]: c.args for c in cliente.reemplazar_archivo.call_args_list}
+        self.assertEqual(set(subidos), {"Anticipos_FBL1N.xlsx", "Archivo_FBL5N.xlsx"})
+        for carpeta, _, contenido in subidos.values():
+            self.assertEqual(carpeta, "CARPETA1")
+            self.assertTrue(contenido.startswith(b"PK"))
+        self.assertIn("FBL5N reemplazado en Drive: Archivo_FBL5N.xlsx", ejecucion.mensaje)
 
-    def test_sin_archivo_de_proveedores_igual_sube_el_reporte(self):
+    def test_fbl5n_en_otra_carpeta_de_drive(self):
+        self.robot.configuracion["carpeta_drive_fbl5n"] = "https://drive.google.com/drive/folders/CARPETA5"
+        self.robot.save()
+        _, cliente, _ = self._ejecutar()
+        subidos = {c.args[1]: c.args[0] for c in cliente.reemplazar_archivo.call_args_list}
+        self.assertEqual(subidos["Archivo_FBL5N.xlsx"], "CARPETA5")
+        self.assertEqual(subidos["Anticipos_FBL1N.xlsx"], "CARPETA1")
+
+    def test_sin_archivo_fbl5n_igual_sube_lo_demas(self):
+        (self.reporte / "Archivo_FBL5N.xlsx").unlink()
+        ejecucion, cliente, _ = self._ejecutar()
+        self.assertEqual(ejecucion.estado, Ejecucion.Estado.EXITOSA)
+        self.assertEqual(cliente.reemplazar_archivo.call_count, 1)
+        self.assertIn("FBL5N: No hay archivos", ejecucion.mensaje)
+
+    def test_fbl5n_desactivado(self):
+        self.robot.configuracion["subir_fbl5n"] = False
+        self.robot.save()
+        _, cliente, _ = self._ejecutar()
+        self.assertEqual(cliente.reemplazar_archivo.call_args.args[1], "Anticipos_FBL1N.xlsx")
+        self.assertEqual(cliente.reemplazar_archivo.call_count, 1)
+
+    def test_sin_archivo_de_proveedores_igual_sube_los_reportes(self):
         for archivo in self.proveedores.iterdir():
             archivo.unlink()
         ejecucion, cliente, _ = self._ejecutar()
         self.assertEqual(ejecucion.estado, Ejecucion.Estado.EXITOSA)
         cliente.escribir_valores.assert_not_called()
-        cliente.reemplazar_archivo.assert_called_once()
+        self.assertEqual(cliente.reemplazar_archivo.call_count, 2)
         self.assertIn("No hay archivos", ejecucion.mensaje)
 
     def test_falta_hoja_configurada(self):
@@ -103,8 +130,8 @@ class RobotDriveReportesTests(TestCase):
         ejecucion, cliente, _ = self._ejecutar()
         self.assertEqual(ejecucion.estado, Ejecucion.Estado.FALLIDA)
         self.assertIn("hoja de Google Sheets", ejecucion.mensaje)
-        self.assertIn("Reporte SAP reemplazado", ejecucion.mensaje)  # la otra parte sí se hizo
-        cliente.reemplazar_archivo.assert_called_once()
+        self.assertIn("FBL1N reemplazado", ejecucion.mensaje)  # las otras partes sí se hicieron
+        self.assertIn("FBL5N reemplazado", ejecucion.mensaje)
 
     def test_mensaje_incluye_todos_los_errores(self):
         self.robot.configuracion["hoja_proveedores"] = ""
@@ -117,4 +144,5 @@ class RobotDriveReportesTests(TestCase):
         ejecucion.refresh_from_db()
         self.assertEqual(ejecucion.estado, Ejecucion.Estado.FALLIDA)
         self.assertIn("Proveedores: Falta la hoja", ejecucion.mensaje)
-        self.assertIn("Reporte SAP: sin espacio", ejecucion.mensaje)
+        self.assertIn("FBL1N: sin espacio", ejecucion.mensaje)
+        self.assertIn("FBL5N: sin espacio", ejecucion.mensaje)

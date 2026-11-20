@@ -1,0 +1,49 @@
+{% load rpa %}
+<div id="cadena-estado"
+     {% if cadena.activa %}hx-get="{% url 'robots:cadena' cadena.pk %}" hx-trigger="every 3s" hx-swap="outerHTML"{% endif %}>
+  <div class="card shadow-sm mb-3">
+    <div class="card-body">
+      <dl class="row mb-0 small">
+        <dt class="col-sm-3">Estado</dt><dd class="col-sm-9"><span class="badge text-bg-{{ cadena.color }}">{% if cadena.activa %}<span class="spinner-border spinner-border-sm me-1"></span>{% endif %}{{ cadena.get_estado_display }}</span></dd>
+        <dt class="col-sm-3">Origen</dt><dd class="col-sm-9">{{ cadena.get_origen_display }}{% if cadena.programacion %} ({{ cadena.programacion.nombre }}){% endif %}</dd>
+        <dt class="col-sm-3">Solicitada por</dt><dd class="col-sm-9">{{ cadena.solicitada_por|default:"Programador" }}</dd>
+        <dt class="col-sm-3">Creada / fin</dt><dd class="col-sm-9">{{ cadena.creada|date:"d/m/Y H:i:s" }} / {{ cadena.fin|date:"H:i:s"|default:"—" }}</dd>
+        <dt class="col-sm-3">Duración</dt><dd class="col-sm-9">{{ cadena.duracion|duracion }}</dd>
+        {% if cadena.mensaje %}<dt class="col-sm-3">Resultado</dt><dd class="col-sm-9">{{ cadena.mensaje }}</dd>{% endif %}
+      </dl>
+    </div>
+    {% if puede_cancelar %}
+    <div class="card-footer bg-white">
+      <form method="post" action="{% url 'robots:cadena_cancelar' cadena.pk %}" class="d-inline" onsubmit="return confirm('¿Cancelar la cadena? No se ejecutarán más pasos.')">
+        {% csrf_token %}<button class="btn btn-sm btn-outline-danger"><i class="bi bi-stop-circle"></i> Cancelar cadena</button>
+      </form>
+      <span class="small text-muted ms-2">Actualización automática cada 3 s</span>
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="card shadow-sm">
+    <div class="card-header bg-white fw-semibold"><i class="bi bi-list-ol"></i> Pasos</div>
+    <div class="table-responsive">
+      <table class="table align-middle mb-0">
+        <thead class="table-light"><tr><th>#</th><th>Robot</th><th>Estado</th><th>Inicio / fin</th><th>Duración</th><th>Resultado</th></tr></thead>
+        <tbody>
+          {% for paso, ejecucion in filas %}
+          <tr>
+            <td class="fw-semibold">{{ paso.orden|default:"—" }}</td>
+            <td>{% if paso %}{{ paso.robot }}{% else %}{{ ejecucion.robot }}{% endif %}</td>
+            <td>
+              {% if ejecucion %}<a href="{% url 'robots:ejecucion' ejecucion.pk %}" class="text-decoration-none">{% include "includes/estado.html" %} <small>#{{ ejecucion.pk }}</small></a>
+              {% elif cadena.activa %}<span class="badge text-bg-light text-muted border">En espera</span>
+              {% else %}<span class="badge text-bg-light text-muted border">No ejecutado</span>{% endif %}
+            </td>
+            <td class="small">{% if ejecucion %}{{ ejecucion.inicio|date:"H:i:s"|default:"—" }} / {{ ejecucion.fin|date:"H:i:s"|default:"—" }}{% endif %}</td>
+            <td class="small">{% if ejecucion %}{{ ejecucion.duracion|duracion }}{% endif %}</td>
+            <td class="small">{% if ejecucion %}{{ ejecucion.mensaje|truncatechars:100 }}{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>

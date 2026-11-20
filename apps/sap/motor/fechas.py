@@ -11,6 +11,12 @@ def mes_anterior(hoy=None):
     return fin.replace(day=1), fin
 
 
+def mes_en_curso(hoy=None):
+    """(primer día del mes, hoy): lo acumulado del mes actual."""
+    hoy = hoy or date.today()
+    return hoy.replace(day=1), hoy
+
+
 def a_sap(fecha):
     return fecha.strftime(FORMATO_SAP)
 

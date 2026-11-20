@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block titulo %}Cadena #{{ cadena.pk }}{% endblock %}
+{% block contenido %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <div>
+    <h1 class="h3 mb-0">Cadena #{{ cadena.pk }}</h1>
+    <div class="text-muted"><a href="{% url 'robots:orquestador' cadena.orquestador.pk %}">{{ cadena.orquestador }}</a></div>
+  </div>
+  <a href="{% url 'robots:orquestador' cadena.orquestador.pk %}" class="btn btn-outline-secondary"><i class="bi bi-arrow-left"></i> Orquestador</a>
+</div>
+{% include "robots/_cadena_estado.html" %}
+{% endblock %}

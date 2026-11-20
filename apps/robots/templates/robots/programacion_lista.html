@@ -3,17 +3,30 @@
 {% block contenido %}
 <div class="d-flex justify-content-between align-items-center mb-4">
   <h1 class="h3 mb-0">Programaciones</h1>
-  <a href="{% url 'robots:programacion_crear' %}" class="btn btn-primary"><i class="bi bi-plus-lg"></i> Nueva programación</a>
+  <div class="text-nowrap">
+    <a href="{% url 'robots:programacion_crear' %}" class="btn btn-outline-primary"><i class="bi bi-cpu"></i> Programar robot</a>
+    <a href="{% url 'robots:programacion_orquestador_crear' %}" class="btn btn-primary"><i class="bi bi-diagram-3"></i> Programar orquestador</a>
+  </div>
 </div>
 <div class="card shadow-sm">
   <div class="table-responsive">
     <table class="table table-hover align-middle mb-0">
-      <thead class="table-light"><tr><th>Nombre</th><th>Robot</th><th>Frecuencia</th><th>Última</th><th>Próxima</th><th>Estado</th><th></th></tr></thead>
+      <thead class="table-light"><tr><th>Nombre</th><th>Robot / orquestador</th><th>Parámetros / robots en orden</th><th>Frecuencia</th><th>Última</th><th>Próxima</th><th>Estado</th><th></th></tr></thead>
       <tbody>
         {% for p in programaciones %}
         <tr>
           <td class="fw-semibold">{{ p.nombre }}</td>
-          <td><a href="{% url 'robots:detalle' p.robot.pk %}">{{ p.robot }}</a></td>
+          <td>
+            {% if p.orquestador %}<a href="{% url 'robots:orquestador' p.orquestador.pk %}"><i class="bi bi-diagram-3"></i> {{ p.orquestador }}</a>
+            {% elif p.robot %}<a href="{% url 'robots:detalle' p.robot.pk %}">{{ p.robot }}</a>{% endif %}
+          </td>
+          <td class="small">
+            {% if p.orquestador %}
+              <ol class="mb-0 ps-3">{% for paso in p.orquestador.pasos.all %}<li>{{ paso.robot }}</li>{% empty %}<li class="text-warning list-unstyled">Sin pasos</li>{% endfor %}</ol>
+            {% else %}
+              {% for etiqueta, valor in p.parametros_legibles %}<div><span class="text-muted">{{ etiqueta }}:</span> {{ valor }}</div>{% empty %}<span class="text-muted">—</span>{% endfor %}
+            {% endif %}
+          </td>
           <td>{{ p.descripcion_frecuencia }}</td>
           <td>{{ p.ultima_ejecucion|date:"d/m/Y H:i"|default:"—" }}</td>
           <td>{{ p.proxima_ejecucion|date:"d/m/Y H:i"|default:"—" }}</td>
@@ -30,11 +43,11 @@
           </td>
         </tr>
         {% empty %}
-        <tr><td colspan="7" class="text-center text-muted py-4">No hay programaciones.</td></tr>
+        <tr><td colspan="8" class="text-center text-muted py-4">No hay programaciones.</td></tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
 </div>
-<p class="text-muted small mt-3"><i class="bi bi-info-circle"></i> Las ejecuciones programadas usan los parámetros por defecto de cada robot (por ejemplo, el mes anterior). El worker debe estar activo a la hora programada.</p>
+<p class="text-muted small mt-3"><i class="bi bi-info-circle"></i> Cada programación de robot guarda sus propios parámetros (por ejemplo, periodo "Mes en curso" y un nombre fijo de archivo); los que queden vacíos usan el valor por defecto del robot. Un orquestador se programa una sola vez: a esa hora arranca la cadena y sus robots corren en orden con los parámetros de cada paso (no hace falta programar cada robot). El worker debe estar activo a la hora programada.</p>
 {% endblock %}

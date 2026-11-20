@@ -1,0 +1,7 @@
+{% if form_parametros %}
+  {% with form=form_parametros %}{% include "includes/campos.html" %}{% endwith %}
+{% elif robot %}
+  <p class="text-muted mb-0">Este robot no tiene parámetros de ejecución.</p>
+{% else %}
+  <p class="text-muted mb-0">Elija un robot para ver sus parámetros.</p>
+{% endif %}

@@ -27,6 +27,7 @@
       <li><a href="{% url 'robots:monitor' %}" class="nav-link {% if ruta == 'robots:monitor' %}active{% endif %}"><i class="bi bi-activity"></i>Monitor</a></li>
       <li><a href="{% url 'robots:ejecuciones' %}" class="nav-link {% if ruta == 'robots:ejecuciones' or ruta == 'robots:ejecucion' %}active{% endif %}"><i class="bi bi-list-check"></i>Ejecuciones</a></li>
       <li><a href="{% url 'robots:lista' %}" class="nav-link {% if ruta == 'robots:lista' or ruta == 'robots:detalle' or ruta == 'robots:configurar' %}active{% endif %}"><i class="bi bi-cpu"></i>Robots</a></li>
+      <li><a href="{% url 'robots:orquestadores' %}" class="nav-link {% if 'orquestador' in ruta or 'paso_' in ruta or 'cadena' in ruta %}active{% endif %}"><i class="bi bi-diagram-3"></i>Orquestadores</a></li>
 
       {% if user.es_admin %}
       <li class="nav-header">Administración</li>

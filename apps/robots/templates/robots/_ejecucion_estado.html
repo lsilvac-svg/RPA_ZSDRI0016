@@ -8,6 +8,9 @@
           <dl class="row mb-0 small">
             <dt class="col-5">Estado</dt><dd class="col-7">{% include "includes/estado.html" %}{% if ejecucion.cancelacion_solicitada and ejecucion.activa %} <span class="badge text-bg-warning">Cancelando…</span>{% endif %}</dd>
             <dt class="col-5">Origen</dt><dd class="col-7">{{ ejecucion.get_origen_display }}{% if ejecucion.programacion %} ({{ ejecucion.programacion.nombre }}){% endif %}</dd>
+            {% if ejecucion.cadena %}
+            <dt class="col-5">Orquestador</dt><dd class="col-7"><a href="{% url 'robots:cadena' ejecucion.cadena.pk %}">{{ ejecucion.cadena.orquestador }} · cadena #{{ ejecucion.cadena.pk }}</a>{% if ejecucion.paso %} (paso {{ ejecucion.paso.orden }}){% endif %}</dd>
+            {% endif %}
             <dt class="col-5">Solicitada por</dt><dd class="col-7">{{ ejecucion.solicitada_por|default:"Programador" }}</dd>
             <dt class="col-5">Creada</dt><dd class="col-7">{{ ejecucion.creada|date:"d/m/Y H:i:s" }}</dd>
             <dt class="col-5">Inicio / fin</dt><dd class="col-7">{{ ejecucion.inicio|date:"H:i:s"|default:"—" }} / {{ ejecucion.fin|date:"H:i:s"|default:"—" }}</dd>
